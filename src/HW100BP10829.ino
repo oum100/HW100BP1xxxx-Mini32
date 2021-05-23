@@ -69,8 +69,15 @@ void setup(){
   wifimulti.addAP("BTnet","1100110011");
   WiFi.mode(WIFI_AP_STA);
 
+ iotcfg.begin("config",false);
+  if(iotcfg.isKey("uuid")){
+    Serial.println("uuid is key");
+  }else{
+    Serial.println("not found uuid");
+  }
 
    //Check header and config file
+  /*
   if(!LITTLEFS.begin(true)){
     Serial.printf("FileSystem Mount Failed\n");
     return;
@@ -141,7 +148,7 @@ void setup(){
     //readCFG(config,cfginfo);
     state = 1;
   }
-
+  */
 
   //
 
