@@ -683,7 +683,7 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
       cfgdata.putFloat(("price"+String(3-x)).c_str(),0);
       cfgdata.putInt(("stime"+ String(3-x)).c_str(),0);      
       price[2-x]=0;
-      
+
     }  
 
     for(int i=0;i<sz;i++){
