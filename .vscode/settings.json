@@ -1,3 +1,12 @@
 {
-    "idf.port": "/dev/cu.usbserial-1420"
+    "idf.port": "/dev/cu.usbserial-1420",
+    "files.associations": {
+        "array": "cpp",
+        "bitset": "cpp",
+        "deque": "cpp",
+        "string": "cpp",
+        "vector": "cpp",
+        "unordered_map": "cpp",
+        "regex": "cpp"
+    }
 }

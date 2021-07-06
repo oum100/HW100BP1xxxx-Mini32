@@ -1,0 +1,36 @@
+Topic: payboard/backend/1000000104/GS3ARKA19GDCAIA
+Request:{"action":"payment","sku":"MA10000110-01"}
+Response: {"qrtxt":"00020101021230830016A0000006770101120115010556006812755021800000021052602511503180002105261622021335303764540520.005802TH5910GBPrimePay630486BA","orderNo":"210526162202133","price":20}
+
+
+
+Topic:
+Requst:
+Response:
+
+To requset QR
+topic: payboard/backend/<merchantid>/<uuid>
+device publish: {"action":"payment","sku":"<sku>"}    "price":"30"  price is option for type 3
+server response:
+
+Then server acknowledge paid
+
+To acknowledge paid
+topic: payboard/backend/<merchantid>/<uuid>
+device publish: {"action":"run","orderNo":"02210526162202332"}
+server response:  notthing.
+
+
+
+Server request ping
+server publish:  {"action":"ping"}  
+into Topic: payboard/backend/<merchantid>/<uuid>
+device response:
+
+
+Server request reset
+server publish:  {"action":"reset"}  
+into Topic: payboard/backend/<merchantid>/<uuid>
+device response:
+
+
