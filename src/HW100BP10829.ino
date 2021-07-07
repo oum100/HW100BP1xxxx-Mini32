@@ -75,9 +75,9 @@ int dispCount =0;
 
 
 WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP);
+NTPClient timeClient(ntpUDP, "asia.pool.ntp.org", 25200, 60000);
 String formattedDate;
-String epochtime;
+unsigned long epochtime;
 String dayStamp;
 String timeStamp;
 int timeleft;
@@ -237,8 +237,6 @@ void setup(){
     price[i] = cfginfo.product[i].price;
     stime[i] = cfginfo.product[i].stime;
   }
-  pbPubTopic = pbPubTopic  + String(cfginfo.payboard.merchantid) +"/"+ String(cfginfo.payboard.uuid);
-  pbSubTopic = pbSubTopic + String(cfginfo.payboard.merchantid) +"/"+ String(cfginfo.payboard.uuid);
 
   //*** Set price per coin
   if(cfginfo.asset.coinModule){
@@ -271,6 +269,11 @@ void setup(){
       Serial.printf("Rescode: %d\n",rescode);
     }
   }
+  cfgdata.end();
+
+  // Set mqtt parameter
+  pbPubTopic = pbPubTopic  + String(cfginfo.payboard.merchantid) +"/"+ String(cfginfo.payboard.uuid);
+  pbSubTopic = pbSubTopic + String(cfginfo.payboard.merchantid) +"/"+ String(cfginfo.payboard.uuid);
 
   //Keep WiFi connection
   while(!WiFi.isConnected()){
@@ -284,7 +287,28 @@ void setup(){
   pbBackendMqtt();
   
 
+  Serial.printf("\nConnecting to TimeServer --> ");
+  //Set NTP
+  timeClient.begin();
+  //timeClient.setTimeOffset(25200);  //GMT+7
+
+  while(!timeClient.update()) {
+    display.print("T1");
+    timeClient.forceUpdate();
+  }
+ 
+  formattedDate = timeClient.getFormattedDate();
+  epochtime = timeClient.getEpochTime();
+  cfgdata.begin("lastboot",false);
+  cfgdata.putULong("epochtime",epochtime);
+  cfgdata.putString("timestamp",formattedDate);
+  cfgdata.end();
+  
+  DBprintf("Start TimeStamp: (%ul) -> %s.\n",epochtime,formattedDate.c_str());
+
+
   display.print("F3");
+  cfgdata.begin("config",false);
   if(cfgdata.isKey("stateflag")){
     stateflag = cfgdata.getInt("stateflag",0);
     Serial.printf("stateflag before: %d\n",stateflag);
@@ -306,6 +330,7 @@ void setup(){
       cfgdata.putInt("stateflag",0);
       stateflag = 0;
       Serial.printf("stateflag after: %d\n",stateflag);
+      cfgState = 3;
     }else if(stateflag ==2){ // After Action OTA
       doc["response"]="ota";
       doc["merchantid"]=cfginfo.payboard.merchantid;
@@ -322,29 +347,36 @@ void setup(){
       cfgdata.putInt("stateflag",0);
       stateflag = 0;
       Serial.printf("stateflag after: %d\n",stateflag);
-    }else if(stateflag == 5){ // Last Service not finish yet
-      cfgState = 5;
-      if(!cfginfo.asset.orderid.isEmpty()){
-          Serial.print("Last orderID: ");
+      cfgState=3;
+    }else if(stateflag == 5){ // Last Service not finish but may be power off.
+      display.print("PE"); //Power Outage Event
+      Serial.printf("Oh stateFlag now is 5\n");
+
+      if(!digitalRead(PROG1)){
+      //if(isHome(PROG1)){ //Machine on service
+        Serial.printf("Resume job\n");
+        cfgState = 5;
+        dispflag = 1;
+        if(!cfginfo.asset.orderid.isEmpty()){
+          Serial.print("Last orderID: \n");
+        }
+        serviceEnd();
+      }else{
+        stateflag = 0;
+        cfgState = 3;
+        cfgdata.putInt("stateflag",stateflag);
+        Serial.printf("Recover power outage\n");
       }
+    }else{
+      cfgState = 3;
     }
   }else{
+    Serial.printf(" It is here \n");
     stateflag = 0;
     cfgdata.putInt("stateflag",stateflag);
+    cfgState = 3;
   }
-
   cfgdata.end();
-
-  cfgState = 3;
-
-  // Serial.printf("\nStep 8: Connecting to TimeServer --> ");
-  // //Set NTP
-  // timeClient.begin();
-  // timeClient.setTimeOffset(25200);  //GMT+7
-  // Serial.printf("Done.\n");
-
-  //Connecting Mqtt 
-
 
   Serial.printf("\n****************************************\n");
   Serial.printf("\nSystem Ready for service.\n");      
@@ -492,6 +524,10 @@ void loop(){
           display.setBacklight(30);
           display.setColonOn(false);
 
+          Serial.printf("dispflag: %d\n",dispflag);
+          Serial.printf("WaitFlag: %d\n",waitFlag);
+
+
           if(!dispflag){
             switch(waitFlag){
               case 1://Prog1
@@ -518,6 +554,9 @@ void loop(){
                 break;
               case 3://Prog3
                 display.animation3(display,200,2);
+                break;
+              default:
+                display.animation2(display,200,2);
                 break;
             }
           }
@@ -876,8 +915,58 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
 
   }else if(action == "backend"){
 
-  }else if(action == "payboard"){
+  }else if(action == "payboard"){// To set payboard parameter
+    String params = doc["params"];
 
+    cfgdata.begin("config",false);
+    if(params == "all"){
+        cfginfo.payboard.uuid = doc["uuid"].as<String>();
+        cfgdata.putString("uuid",cfginfo.payboard.uuid);
+      
+        cfginfo.payboard.merchantid = doc["merchantid"].as<String>();;
+        cfginfo.payboard.merchantkey = doc["merchantkey"].as<String>();
+        cfgdata.putString("merchantid",cfginfo.payboard.merchantid);
+        cfgdata.putString("merchantkey",cfginfo.payboard.merchantkey);
+      
+        cfginfo.payboard.apihost = doc["apihost"].as<String>();
+        cfginfo.payboard.apikey = doc["apikey"].as<String>();
+        cfgdata.putString("apihost",cfginfo.payboard.apihost);
+        cfgdata.putString("apikey",cfginfo.payboard.apikey);
+      
+        cfginfo.payboard.mqtthost = doc["mqtthost"].as<String>();
+        cfginfo.payboard.mqttport = doc["mqttportt"].as<int>();
+        cfginfo.payboard.mqttuser = doc["mqttuser"].as<String>();
+        cfginfo.payboard.mqttpass = doc["mqttpass"].as<String>();
+        cfgdata.putString("mqtthost",cfginfo.payboard.mqtthost);
+        cfgdata.putInt("mqttport",cfginfo.payboard.mqttport);
+        cfgdata.putString("mqttuser",cfginfo.payboard.mqttuser);
+        cfgdata.putString("mqttpass",cfginfo.payboard.mqttpass);
+    }else{
+      if(params == "uuid"){
+        cfginfo.payboard.uuid = doc["uuid"].as<String>();
+        cfgdata.putString("uuid",cfginfo.payboard.uuid);
+      }else if(params == "merchantid"){
+        cfginfo.payboard.merchantid = doc["merchantid"].as<String>();;
+        cfginfo.payboard.merchantkey = doc["merchantkey"].as<String>();
+        cfgdata.putString("merchantid",cfginfo.payboard.merchantid);
+        cfgdata.putString("merchantkey",cfginfo.payboard.merchantkey);
+      }else if(params == "apihost"){
+        cfginfo.payboard.apihost = doc["apihost"].as<String>();
+        cfginfo.payboard.apikey = doc["apikey"].as<String>();
+        cfgdata.putString("apihost",cfginfo.payboard.apihost);
+        cfgdata.putString("apikey",cfginfo.payboard.apikey);
+      }else if(params == "mqtthost"){
+        cfginfo.payboard.mqtthost = doc["mqtthost"].as<String>();
+        cfginfo.payboard.mqttport = doc["mqttportt"].as<int>();
+        cfginfo.payboard.mqttuser = doc["mqttuser"].as<String>();
+        cfginfo.payboard.mqttpass = doc["mqttpass"].as<String>();
+        cfgdata.putString("mqtthost",cfginfo.payboard.mqtthost);
+        cfgdata.putInt("mqttport",cfginfo.payboard.mqttport);
+        cfgdata.putString("mqttuser",cfginfo.payboard.mqttuser);
+        cfgdata.putString("mqttpass",cfginfo.payboard.mqttpass);
+      }
+    }
+    cfgdata.end();
   }else if(action == "orderid"){
 
   }else if(action == "stateflag"){ //stateflag is flag for mark action before reboot  ex 1 is for reboot action, 2 for ota action
@@ -903,7 +992,10 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
   }
 
   serializeJson(doc,jsonmsg);
+  Serial.println();
+  Serial.print("pbPubTopic: "); Serial.println(pbPubTopic);
   Serial.print("Jsonmsg: ");Serial.println(jsonmsg);
+
   if(!mqclient.connected()){
     pbBackendMqtt();
   }
@@ -1214,19 +1306,22 @@ void prog3start(){
 
 void serviceEnd(){
 
-  if(digitalRead(PROG1)){
-    coinValue = 0;
+  if(digitalRead(PROG1)){ // digitalRead(PROG1) if get  0 = machine still running.
     coin=0;
+    coinValue = 0;
     cfgState = 3;
     waitFlag = 0;
+    dispflag = 0;
 
     cfgdata.begin("config",false);
     cfgdata.putInt("stateflag",0);
     cfgdata.putString("orderid","");
     cfgdata.end();
-    Serial.printf("Service Finish\n");
+    Serial.printf("Job Finish.  Poweroff machine soon.\n");
   }else{
-    serviceTime.stop(serviceTimeID);
+    Serial.printf("Job still running. wait for one more minute\n");
+    //serviceTime.stop(serviceTimeID);
+    
     serviceTimeID=serviceTime.after((60*1000*1),serviceEnd);
   }
 
