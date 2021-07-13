@@ -2,11 +2,6 @@
 #include "startup.h"
 
 
-#ifdef NVS
-  #include <nvs_flash.h>
-#endif
-
-
 // #ifdef HW100BP10829V200
 //   byte OUTPUTPIN[] = {AD2,AD1,AD0,CTRLPULSE,ENCOIN,UNLOCK,BUZZ,GREEN_LED};
 //   byte INPUTPIN[] = {PROG1,PROG2,DLOCK,COININ};
@@ -89,11 +84,17 @@ secureEsp32FOTA esp32OTA("HW100BP10829", "1.0.0");
 gpio_config_t io_config;
 xQueueHandle gpio_evt_queue = NULL;
 
+
+
+
 void IRAM_ATTR gpio_isr_handler(void* arg)
 {
   long gpio_num = (long) arg;
   xQueueSendFromISR(gpio_evt_queue, &gpio_num, NULL);
 }
+
+
+
 
 void gpio_task(void *arg){
     gpio_num_t io_num;  
@@ -153,6 +154,12 @@ void interrupt(){
         gpio_isr_handler_add((gpio_num_t)MODESW, gpio_isr_handler, (void*) MODESW);
     #endif
 }
+
+
+
+
+
+
 
 
 //*********************************** Setup is here. *********************************** 
@@ -400,6 +407,10 @@ void setup(){
 //*--------------------------------- End of Setup. ---------------------------------*// 
 
 
+
+
+
+
 //*********************************** LOOP is here. *********************************** 
 void loop(){
 
@@ -610,6 +621,12 @@ void loop(){
 
 
 
+
+
+
+
+
+
 void pbRegCallback(char* topic, byte* payload, unsigned int length){
   Serial.print("Message arrived pbRegisterCallback with topic: ");
   Serial.println(topic);
@@ -660,6 +677,8 @@ void pbRegCallback(char* topic, byte* payload, unsigned int length){
 
 
 
+
+
 void pbRegisMqtt(){
   Serial.printf("Registering to backend server\n");
   mqclient.setServer(cfginfo.payboard.mqtthost.c_str(),cfginfo.payboard.mqttport);
@@ -697,6 +716,8 @@ void pbRegisMqtt(){
   }
   //doc.clear();
 }
+
+
 
 
 void pbCallback(char* topic, byte* payload, unsigned int length){
@@ -874,7 +895,7 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     bool shouldExecuteFirmwareUpdate=esp32OTA.execHTTPSCheck();
     if(shouldExecuteFirmwareUpdate){
       cfginfo.asset.firmware = esp32OTA._firwmareVersion.c_str();      
-      saveCFG(cfginfo,LITTLEFS);
+      //saveCFG(cfginfo,LITTLEFS);   (13Jul64)
       
       //set stateflag = 2 flag
       cfgdata.begin("config",false);
@@ -1083,6 +1104,11 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
   mqclient.publish(pbPubTopic.c_str(),jsonmsg.c_str());
   delay(500);
 }
+
+
+
+
+
 
 
 void pbBackendMqtt(){
