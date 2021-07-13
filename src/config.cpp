@@ -7,22 +7,7 @@
 #include "myFs.h"
 
 //to set firmware version find  cfg.asset.firmware  (row 30)
-    
-    
-    
-    
-    
-   
-   
-    
-    
-    
-    
-    
-    
-   
-    
-    
+
 
 void getNVCFG(Preferences nvcfg, Config &cfg){
     nvcfg.begin("config",false);
@@ -41,6 +26,10 @@ void getNVCFG(Preferences nvcfg, Config &cfg){
 
         if(nvcfg.isKey("coinModule")){
             cfg.asset.coinModule = nvcfg.getInt("coinModule");
+        }
+
+        if(nvcfg.isKey("assettype")){
+            cfg.asset.assettype = nvcfg.getInt("assettype");
         }
 
         if(nvcfg.isKey("merchantid")){
@@ -86,6 +75,8 @@ void getNVCFG(Preferences nvcfg, Config &cfg){
             cfg.product[2].price = nvcfg.getFloat("price3");
             cfg.product[2].stime = nvcfg.getInt("stime3");
         }
+
+
 
     nvcfg.end();
 }
@@ -432,7 +423,9 @@ void showCFG(Config &cfg){
 
     Serial.printf("\nAsset Configuration\n");
     Serial.printf("  AssetID: %s\n",cfg.asset.assetid.c_str());
+    Serial.printf("  Orderid: %s\n",cfg.asset.orderid.c_str());
     Serial.printf("  CoinType: %d\n",cfg.asset.coinModule);
+    Serial.printf("  AssetType: %d\n",cfg.asset.assettype);
     Serial.printf("  Firmware: %s\n",cfg.asset.firmware.c_str());
     Serial.printf("  MacAddress: %s\n",cfg.asset.mac.c_str());
     Serial.printf("  Model: %s\n",cfg.asset.model.c_str());
@@ -485,9 +478,10 @@ bool saveCFG(Config &cfg,fs::FS &fs){
       writeFile2(LITTLEFS,"/config.json",cfginfoJSON.c_str());
       LITTLEFS.end();
       Serial.println("  configCFG save completed.");      
-
+      return true;
     }else{
       Serial.println("   File System failed");
+      return false;
     }
 }
 

@@ -6,6 +6,7 @@
 #include <LITTLEFS.h>
 #include <Preferences.h>
 
+
 struct Product{
     String sku;
     float  price;
@@ -38,6 +39,7 @@ struct Asset{
     String user;
     String pass;
     int coinModule;
+    int assettype;
 };
 
 struct Backend{
@@ -59,13 +61,8 @@ struct Config{
     Product product[3];
 };
 
-
-
-
-
-
-
 enum cointype {SINGLE,MULTI};
+enum machinetype {WASHER, DRYER};
 
 void initOUTPUT(int inx,byte *pin);
 void initINPUT(int inx, byte *pin);

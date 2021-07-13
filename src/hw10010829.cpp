@@ -1,6 +1,6 @@
 #include <Arduino.h>
 #include "hw10010829.h"
-#include "startup.h"
+//#include "startup.h"
 
 
 

@@ -1,19 +1,18 @@
 #include <Arduino.h>
 #include "startup.h"
-
-
+#include <time.h>
 
 #ifdef NVS
   #include <nvs_flash.h>
 #endif
 
-#ifdef HW100BP10829V200
-  byte OUTPUTPIN[] = {AD2,AD1,AD0,CTRLPULSE,ENCOIN,UNLOCK,BUZZ,GREEN_LED};
-  byte INPUTPIN[] = {PROG1,PROG2,DLOCK,COININ};
+// #ifdef HW100BP10829V200
+//   byte OUTPUTPIN[] = {AD2,AD1,AD0,CTRLPULSE,ENCOIN,UNLOCK,BUZZ,GREEN_LED};
+//   byte INPUTPIN[] = {PROG1,PROG2,DLOCK,COININ};
 
-  int TOTALINPUT = sizeof(INPUTPIN);
-  int TOTALOUTPUT = sizeof(OUTPUTPIN);
-#endif
+//   int TOTALINPUT = sizeof(INPUTPIN);
+//   int TOTALOUTPUT = sizeof(OUTPUTPIN);
+// #endif
 //SevenSegmentTM1637 display(CLK,DIO);
 //SevenSegmentExtended display(CLK,DIO);
 //SevenSegmentFun display(CLK,DIO);
@@ -38,9 +37,9 @@ int pricePerCoin=0;
 int waitFlag = 0;
 bool dispflag=0;
 
-Timer serviceTime, waitTime;
+Timer serviceTime, waitTime, timeLeft, blinkWiFi;
 
-int8_t serviceTimeID,waitTimeID;
+int8_t serviceTimeID,waitTimeID,timeLeftID, blinkWiFiID;
 
 WiFiMulti wifimulti;
 WiFiClient espclient;
@@ -54,14 +53,13 @@ IPAddress SoftAP_IP(192,168,8,20);
 IPAddress SoftAP_GW(192,168,8,1);
 IPAddress SoftAP_SUBNET(255,255,255,0);
 
-gpio_config_t io_config;
-xQueueHandle gpio_evt_queue = NULL;
 int coin=0;
 //int bill=0;
 int paymentby = 0;
 int stateflag = 0;
 
-
+String ntpServer1 = "0.th.pool.ntp.org";
+String ntpServer2 = "1.th.pool.ntp.org";
 
 String json_config;
 //Payboard
@@ -69,20 +67,25 @@ String pbRegTopic PROGMEM = "payboard/register";
 String pbPubTopic PROGMEM = "payboard/backend/"; // payboard/backend/<merchantid>/<uuid>
 String pbSubTopic PROGMEM = "payboard/"; //   payboard/<merchantid>/<uuid>
 
+
 byte keyPress; //*** for keep keypress value.
 byte cfgState=0;
 int dispCount =0;
 
+//WiFiUDP ntpUDP;
+//NTPClient timeClient(ntpUDP, "asia.pool.ntp.org", 25200, 60000);
 
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "asia.pool.ntp.org", 25200, 60000);
 String formattedDate;
 unsigned long epochtime;
 String dayStamp;
 String timeStamp;
-int timeleft;
+int timeRemain=0;
+
 
 secureEsp32FOTA esp32OTA("HW100BP10829", "1.0.0");
+
+gpio_config_t io_config;
+xQueueHandle gpio_evt_queue = NULL;
 
 void IRAM_ATTR gpio_isr_handler(void* arg)
 {
@@ -117,16 +120,12 @@ void gpio_task(void *arg){
     }
 }
 
-void interrupt(){
-    //gpio_config_t io_conf;
 
-    //io_config.intr_type = GPIO_INTR_ANYEDGE;
+
+void interrupt(){
+
     io_config.intr_type = GPIO_INTR_NEGEDGE;
-    //io_config.intr_type = GPIO_INTR_POSEDGE;
-    //io_config.intr_type = GPIO_INTR_LOW_LEVEL;
-    //io_config.intr_type = GPIO_INTR_HIGH_LEVEL;
-    
-    io_config.pin_bit_mask = INPUT_SET;
+    io_config.pin_bit_mask = INTERRUPT_SET;
     io_config.mode = GPIO_MODE_INPUT;
     io_config.pull_up_en = (gpio_pullup_t)1;
 
@@ -154,6 +153,15 @@ void interrupt(){
 }
 
 
+void printLocalTime()
+{
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    Serial.println("Failed to obtain time");
+    return;
+  }
+  Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
+}
 
 //*********************************** Setup is here. *********************************** 
 void setup(){
@@ -166,15 +174,10 @@ void setup(){
     nvs_flash_init(); // initialize the NVS partition.
     while(true);
   #endif
- 
-  //LITTLEFS.format();
-
-  //digitalWrite(0,LOW);
-  digitalWrite(COININ,HIGH);
 
   Serial.begin(115200); 
   Serial.println();
-  Serial.println("Booting...");
+  Serial.println("Setting up device...");
 
 
   //*** initial 7Segment Display
@@ -184,11 +187,20 @@ void setup(){
  
  
   //*** Initial GPIO
-  initOUTPUT(TOTALOUTPUT,OUTPUTPIN);
-  initINPUT(TOTALINPUT,INPUTPIN);
 
-  //digitalWrite(ENCOIN,HIGH);
-  //pinMode(LED1,OUTPUT);
+    //** Initial INPUT & OUTPUT PIN
+  io_config.pin_bit_mask = INPUT_SET;  
+  io_config.intr_type = GPIO_INTR_DISABLE;
+  io_config.mode = GPIO_MODE_INPUT;
+  io_config.pull_up_en = GPIO_PULLUP_ENABLE;
+  gpio_config(&io_config);
+
+  //** Initial INPUT & OUTPUT PIN
+  io_config.pin_bit_mask = OUTPUT_SET;
+  io_config.intr_type = GPIO_INTR_DISABLE;
+  io_config.mode = GPIO_MODE_INPUT_OUTPUT;
+  gpio_config(&io_config);
+
   
   //*** Intial Interrupt
   interrupt();
@@ -217,7 +229,6 @@ void setup(){
   }
 
   display.print("F1");
-  blinkGPIO(GREEN_LED,500); 
   Serial.println("...Wifi Connected...");
   WiFiinfo();
   delay(300);
@@ -228,14 +239,18 @@ void setup(){
   //Preparing API data
   cfginfo.deviceid = getdeviceid();
   cfginfo.asset.mac = WiFi.macAddress();
+  
 
-  //Getting config from NV-RAM
+  //**** Getting config from NV-RAM
   getNVCFG(cfgdata,cfginfo);
+  showCFG(cfginfo);
 
   int sz = sizeof(cfginfo.product)/sizeof(cfginfo.product[0]);
   for(int i=0;i<sz;i++){
+    Serial.printf("Before Stime[%d]: %d\n",i+1,stime[i]);
     price[i] = cfginfo.product[i].price;
-    stime[i] = cfginfo.product[i].stime;
+    //stime[i] = cfginfo.product[i].stime;
+    Serial.printf("After Stime[%d]: %d\n",i+1,stime[i]);
   }
 
   //*** Set price per coin
@@ -282,32 +297,29 @@ void setup(){
     wifimulti.run();
     delay(2000);
   }
+  blinkGPIO(GREEN_LED,300); 
 
-  blinkGPIO(GREEN_LED,500);
+  //**** Connecting MQTT
+  display.print("F3");
   pbBackendMqtt();
   
 
+  //*** Set NTP
+  display.print("F4");
   Serial.printf("\nConnecting to TimeServer --> ");
-  //Set NTP
-  timeClient.begin();
-  //timeClient.setTimeOffset(25200);  //GMT+7
-
-  while(!timeClient.update()) {
-    display.print("T1");
-    timeClient.forceUpdate();
-  }
- 
-  formattedDate = timeClient.getFormattedDate();
-  epochtime = timeClient.getEpochTime();
+  configTime(6*3600,3600,ntpServer1.c_str(),ntpServer2.c_str());
+  printLocalTime();
+  time_t tnow;
+  time(&tnow);
   cfgdata.begin("lastboot",false);
-  cfgdata.putULong("epochtime",epochtime);
-  cfgdata.putString("timestamp",formattedDate);
+  cfgdata.putULong("epochtime",tnow);
+  cfgdata.putString("timestamp",ctime(&tnow));
   cfgdata.end();
-  
-  DBprintf("Start TimeStamp: (%ul) -> %s.\n",epochtime,formattedDate.c_str());
+  DBprintf("Lastest booting: (%ld) -> %s.\n",tnow,ctime(&tnow));
 
 
-  display.print("F3");
+  //******  Check stateflag 
+  display.print("F5");
   cfgdata.begin("config",false);
   if(cfgdata.isKey("stateflag")){
     stateflag = cfgdata.getInt("stateflag",0);
@@ -350,23 +362,33 @@ void setup(){
       cfgState=3;
     }else if(stateflag == 5){ // Last Service not finish but may be power off.
       display.print("PE"); //Power Outage Event
-      Serial.printf("Oh stateFlag now is 5\n");
-
-      if(!digitalRead(PROG1)){
-      //if(isHome(PROG1)){ //Machine on service
-        Serial.printf("Resume job\n");
-        cfgState = 5;
-        dispflag = 1;
-        if(!cfginfo.asset.orderid.isEmpty()){
-          Serial.print("Last orderID: \n");
-        }
-        serviceEnd();
-      }else{
-        stateflag = 0;
-        cfgState = 3;
-        cfgdata.putInt("stateflag",stateflag);
-        Serial.printf("Recover power outage\n");
+      cfgState = stateflag;
+      dispflag = 1;
+      timeRemain = cfgdata.getInt("timeremain",0);
+      Serial.printf("Not finish job found with [%d] minutes remain.\n",timeRemain);
+      
+      switch(cfginfo.asset.assettype){
+        case WASHER:   // 0 =  Washing Machine
+          if(!digitalRead(PROG1)){ // Check is machine running by read LED if 0=running  , 1 = off
+          //if(isHome(PROG1)){ //Machine on service
+            Serial.printf("Resuming job for orderID: %s\n",cfginfo.asset.orderid.c_str());
+            serviceTimeID = serviceTime.after(60*1000*timeRemain,serviceEnd);
+            timeLeftID = timeLeft.every(60*1000*1,serviceLeft);
+            //serviceEnd();
+          }else{
+            stateflag = 0;
+            cfgState = 3;
+            dispflag = 0;
+            timeRemain = 0;
+            cfgdata.putInt("stateflag",stateflag);
+            cfgdata.putInt("timeremmain",timeRemain);
+            Serial.printf("Recover power outage\n");
+          }
+          break;
+        case DRYER:   // 1 = Dryer Machine
+          break;
       }
+
     }else{
       cfgState = 3;
     }
@@ -378,8 +400,10 @@ void setup(){
   }
   cfgdata.end();
 
+  display.print("F6");
   Serial.printf("\n****************************************\n");
-  Serial.printf("\nSystem Ready for service.\n");      
+  Serial.printf("\nSystem Ready for service.\n");    
+  delay(500);  
 } 
 //*--------------------------------- End of Setup. ---------------------------------*// 
 
@@ -433,17 +457,8 @@ void loop(){
   
 
   if(WiFi.isConnected()){
-    blinkGPIO(GREEN_LED,500); 
-
-    while(!timeClient.update()) {
-      timeClient.forceUpdate();
-    }
-    formattedDate = timeClient.getFormattedDate();
-    epochtime = timeClient.getEpochTime();
-    //Serial.println(formattedDate);
-    int splitT = formattedDate.indexOf("T");
-    dayStamp = formattedDate.substring(0,splitT);
-    timeStamp = formattedDate.substring(splitT+1,formattedDate.length()-1);
+    blinkGPIO(GREEN_LED,300); 
+    //blinkWiFiID = blinkWiFi.pulseImmediate(GREEN_LED,650,HIGH);
 
     if(!mqclient.connected() && (cfgState >= 2)){
       pbBackendMqtt();
@@ -462,12 +477,10 @@ void loop(){
           break;
       case 3: //*** get config from File System.
           //Serial.printf(" ------------ This is in cfgState 3 -----------%d\n",coinValue);
-          digitalWrite(ENCOIN,HIGH);
+          digitalWrite(ENCOIN,HIGH);   // Waiting for Coin
 
           if(coinValue > 0){
             cfgState = 4;
-            //paymentby = 1;
-            
           }else{
             String dispPrice;
             if(price[0]!=0){
@@ -479,44 +492,55 @@ void loop(){
             if(price[2]!=0){
               dispPrice = dispPrice + "--" +String(price[2]);
             }
-            
             display.scrollingText(dispPrice.c_str(),1);
-            //showPrice(display,dispCount,30,10);
-            //coinValue = 0; // This for test only can delete.
           }
           break;
       case 4: //*** After 1st coin insert
-          //Serial.printf("----------- This is cfgState 4 ------------");
-          if((coinValue == price[0]) && (waitFlag == 0)){\
-            waitFlag = 1;
-            //cfgState = 5;
-            Serial.printf("Program 1 :%d\n", coinValue);
-            waitTimeID=waitTime.after(60*1000*0.3,prog1start);
-            
-          }else if((coinValue == price[1]) && (waitFlag <= 1)){
-            waitTime.stop(waitTimeID);
-            waitFlag =2;
-            //cfgState = 5;
-            Serial.printf("Program 2 :%d\n", coinValue);
-            
-            waitTimeID=waitTime.after(60*1000*0.3,prog2start);
-            
-          }else if((coinValue == price[2]) && (waitFlag <= 2)){
-            display.setBacklight(30);
-            display.print(coinValue);
-            display.setColonOn(true);
-            delay(300);
+          switch(cfginfo.asset.assettype){
+            case WASHER:// 0 = Washing Machine
+              if((coinValue == price[0]) && (waitFlag == 0)){\
+                waitFlag = 1;
+                //cfgState = 5;
+                Serial.printf("Program 1 :%d\n", coinValue);
+                waitTimeID=waitTime.after(60*1000*0.3,prog1start);
+                
+              }else if((coinValue == price[1]) && (waitFlag <= 1)){
+                waitTime.stop(waitTimeID);
+                waitFlag =2;
+                //cfgState = 5;
+                Serial.printf("Program 2 :%d\n", coinValue);
+                
+                waitTimeID=waitTime.after(60*1000*0.3,prog2start);
+                
+              }else if((coinValue == price[2]) && (waitFlag <= 2)){
+                display.setBacklight(30);
+                display.print(coinValue);
+                display.setColonOn(true);
+                delay(300);
 
-            waitTime.stop(waitTimeID);
-            waitFlag= 3;
-            //cfgState = 5;
-            Serial.printf("Program 3 :%d\n", coinValue);
-            waitTimeID=waitTime.after(60*1000*0.3,prog3start);
-            //prog3start();
-          }else{
-            display.setBacklight(30);
-            display.print(coinValue);
-            display.setColonOn(true);
+                waitTime.stop(waitTimeID);
+                waitFlag= 3;
+                //cfgState = 5;
+                Serial.printf("Program 3 :%d\n", coinValue);
+                waitTimeID=waitTime.after(60*1000*0.3,prog3start);
+                //prog3start();
+              }else{
+                display.setBacklight(30);
+                display.print(coinValue);
+                display.setColonOn(true);
+              }
+
+              break;
+            case DRYER: // 1 = Dryer Machine
+              if(coinValue == price[0]){
+                Serial.printf("Dryer Program-1 for 60 mins :%d\n", coinValue);
+                waitTimeID=waitTime.after(60*1000*0.3,prog1start);
+              }else{
+                display.setBacklight(30);
+                display.print(coinValue);
+                display.setColonOn(true);
+              }
+              break;
           }
           break;
       case 5:
@@ -524,9 +548,8 @@ void loop(){
           display.setBacklight(30);
           display.setColonOn(false);
 
-          Serial.printf("dispflag: %d\n",dispflag);
-          Serial.printf("WaitFlag: %d\n",waitFlag);
-
+          // Serial.printf("dispflag: %d\n",dispflag);
+          // Serial.printf("WaitFlag: %d\n",waitFlag);
 
           if(!dispflag){
             switch(waitFlag){
@@ -587,7 +610,9 @@ void loop(){
 
   serviceTime.update();
   waitTime.update();
+  timeLeft.update();
   mqclient.loop();
+
 }
 //*--------------------------------- End of LOOP. ---------------------------------*// 
 
@@ -742,6 +767,8 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
       cfginfo.product[i].sku = sku;
       cfginfo.product[i].price = price[i];
       cfginfo.product[i].stime = stime[i];
+
+      Serial.printf("Saving stime[%d]: %d\n",i,stime[i]);
     }
 
     cfgdata.end();
@@ -801,7 +828,19 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     doc["merchantid"]=cfginfo.payboard.merchantid;
     doc["uuid"]=cfginfo.payboard.uuid;
     doc["rssi"]=WiFi.RSSI();
-    doc["state"]=cfgState;
+    switch(cfgState){
+      case 3: // Available (waiting for job)
+          doc["state"] = "Available";
+          break;
+      case 4: // Available (waiting for job)
+          doc["state"] = "Booked"; // Coin inserted
+          break;
+      case 5: // Available (waiting for job)
+          doc["state"] = "Busy"; // On Service
+          break;
+    }
+    //doc["state"]=cfgState;
+    doc["timeRemain"] = timeRemain;
 
   }else if( (action == "reset") || (action=="reboot") || (action=="restart")){
       //set stateflag = 2 flag
@@ -1119,8 +1158,10 @@ void prog1start(){
   String response;
   int rescode;
   
-  if(1){   //Comment this row when production
-  //if(startProg(1)){  //unComment this row when production
+  digitalWrite(ENCOIN,LOW); // Disable Coin Module
+
+  //if(1){   //Comment this row when production
+  if(startProg(1)){  //unComment this row when production
     Serial.printf("Starting Prog1Start , Paymentby %d\n",paymentby);
     cfgState = 5;
     cfgdata.begin("config",false);
@@ -1162,17 +1203,20 @@ void prog1start(){
     }
     cfgdata.end();
 
-    startProg(1);
+    //startProg(1);
 
-    stime[0]=1; // for testing only
+    Serial.printf(" Program Time: %d\n",stime[0]);
+    //stime[0]=1; // for testing only
     serviceTimeID=serviceTime.after((60*1000*stime[0]),serviceEnd);
-    Serial.printf("Starting program 1\n");
+    timeRemain = stime[0];
+    timeLeftID = timeLeft.every(60*1000*1,serviceLeft);
+    Serial.printf("On service of Program-1 for %d minutes\n",stime[0]);
   }else{
     coin=0;
     coinValue=0;
     cfgState = 6;
     display.print("E1");
-    Serial.printf("Start Program 1 failed\n");
+    Serial.printf("Failed to start service of Program-1\n");
   }
 }
 
@@ -1183,8 +1227,9 @@ void prog2start(){
   String response;
   int rescode;
 
-  if(1){   //Comment this row when production
-  //if(startProg(2)){    //unComment this row when production
+  digitalWrite(ENCOIN,LOW);
+  //if(1){   //Comment this row when production
+  if(startProg(2)){    //unComment this row when production
     Serial.printf("Starting Prog1Start., Paymentby %d\n",paymentby);
     cfgState = 5;
     cfgdata.begin("config",false);
@@ -1226,17 +1271,20 @@ void prog2start(){
     }
     cfgdata.end();
 
-    startProg(2);
+    //startProg(2);
 
-    stime[1]=1; // for testing only
+    Serial.printf(" Program Time: %d\n",stime[1]);
+    //stime[1]=1; // for testing only
     serviceTimeID=serviceTime.after((60*1000*stime[1]),serviceEnd);
-    Serial.printf("Starting program 2\n");
+    timeRemain = stime[1];
+    timeLeftID = timeLeft.every(60*1000*1,serviceLeft);
+    Serial.printf("On service of Program-2 for %d minutes\n",stime[1]);
   }else{
     coin=0;
     coinValue=0;
     cfgState = 6;
     display.print("E2");
-    Serial.printf("Start Program 2 failed\n");
+    Serial.printf("Failed to start service of Program-2\n");
   }
 }
 
@@ -1247,8 +1295,9 @@ void prog3start(){
   String response;
   int rescode;
 
-  if(1){   //Comment this row when production
-  //if(startProg(3)){   //unComment this row when production
+  digitalWrite(ENCOIN,LOW);
+  //if(1){   //Comment this row when production
+  if(startProg(3)){   //unComment this row when production
     Serial.printf("Starting Prog1Start., Paymentby %d\n",paymentby);
     cfgState = 5;
     cfgdata.begin("config",false);
@@ -1289,40 +1338,51 @@ void prog3start(){
         break;
     }
     cfgdata.end();
-
-    stime[2]=1; // for testing only
+    //startProg(3);
+    Serial.printf(" Program Time: %d\n",stime[2]);
+    //stime[2]=1; // for testing only
     serviceTimeID=serviceTime.after((60*1000*stime[2]),serviceEnd);
-    Serial.printf("Starting program 3\n");
+    timeRemain = stime[2];
+    timeLeftID = timeLeft.every(60*1000*1,serviceLeft);
+    Serial.printf("On service of Program-3 for %d minutes\n",stime[2]);
   }else{
     coin=0;
     coinValue=0;
     cfgState = 6;
     display.print("E3");
-    Serial.printf("Start Program 3 failed\n");
+    Serial.printf("Failed to start service of Program-3\n");
   }
 }
 
-
+void serviceLeft(){
+  Serial.printf("Service Time remain: %d\n",--timeRemain);
+  cfgdata.begin("config",false);
+  cfgdata.putInt("timeremain",timeRemain);
+  cfgdata.end();
+}
 
 void serviceEnd(){
-
+  timeLeft.stop(timeLeftID);
   if(digitalRead(PROG1)){ // digitalRead(PROG1) if get  0 = machine still running.
+    timeRemain = 0;
     coin=0;
     coinValue = 0;
     cfgState = 3;
     waitFlag = 0;
     dispflag = 0;
 
+
     cfgdata.begin("config",false);
     cfgdata.putInt("stateflag",0);
     cfgdata.putString("orderid","");
+    cfgdata.putInt("timeremain",0);
     cfgdata.end();
     Serial.printf("Job Finish.  Poweroff machine soon.\n");
   }else{
     Serial.printf("Job still running. wait for one more minute\n");
     //serviceTime.stop(serviceTimeID);
-    
     serviceTimeID=serviceTime.after((60*1000*1),serviceEnd);
+    timeLeftID = timeLeft.every(60*1000*1,serviceLeft);
   }
 
 }
