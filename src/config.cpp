@@ -6,6 +6,11 @@
 #include "config.h"
 #include "myFs.h"
 
+
+String SoftAP_NAME PROGMEM = "BT_" + getdeviceid();
+IPAddress SoftAP_IP(192,168,8,20);
+IPAddress SoftAP_GW(192,168,8,1);
+IPAddress SoftAP_SUBNET(255,255,255,0);
 //to set firmware version find  cfg.asset.firmware  (row 30)
 
 
@@ -97,14 +102,17 @@ void initCFG(Config &cfg){
     cfg.payboard.mqttuser = cfg.payboard.merchantid;
     cfg.payboard.mqttpass= cfg.payboard.merchantkey;
 
+    Serial.printf("  MerchantID: %s\n",cfg.payboard.merchantid.c_str());
+
 
     cfg.asset.assetid="";
     cfg.asset.orderid="";
+    cfg.asset.assettype=DRYER; // 0 = WASHER, 1 = DRYER
     cfg.asset.coinModule=SINGLE; //  SINGLE=0, MULTI=1
     cfg.asset.user="admin";
     cfg.asset.pass="ad1@#min";
     cfg.asset.mac = "";
-    cfg.asset.model ="HW10BP10829_V2.0.0";
+    cfg.asset.model ="HaierDryer_V2.0.2";
     cfg.asset.firmware = "1.0.0";
 
     cfg.backend.apihost="https://cointracker100.herokuapp.com/cointracker/v1.0.0/devices";
@@ -114,14 +122,34 @@ void initCFG(Config &cfg){
     cfg.backend.mqttpass="password";
     cfg.backend.mqttport = 1883;    
 
-    for(int i=0;i<3;i++){
-        cfg.wifissid[i].key = "";
-        cfg.wifissid[i].ssid ="";
+    if(cfg.asset.assettype == 0){//WASHER
+      cfg.product[0].sku = "P1";
+      cfg.product[0].price = 30;
+      cfg.product[0].stime = 25;
 
-        cfg.product[i].sku="";
-        cfg.product[i].price=0;
-        cfg.product[i].stime=0;
+      cfg.product[1].sku = "P2";
+      cfg.product[1].price = 40;
+      cfg.product[1].stime = 35;
+
+      cfg.product[2].sku = "P3";
+      cfg.product[2].price = 50;
+      cfg.product[2].stime = 40;   
+    }else{
+      cfg.product[0].sku = "P1";
+      cfg.product[0].price = 40;
+      cfg.product[0].stime = 60;
+
+      cfg.product[1].sku = "P2";
+      cfg.product[1].price = 10;
+      cfg.product[1].stime = 15;
     }
+    
+
+    // for(int i=0;i<3;i++){
+    //     cfg.product[i].sku="";
+    //     cfg.product[i].price=0;
+    //     cfg.product[i].stime=0;
+    // }
 }
 
 
@@ -442,6 +470,9 @@ void showCFG(Config &cfg){
 
     Serial.printf("\nPayboard Configuration\n");
     Serial.printf("  MerchantId: %s\n",cfg.payboard.merchantid.c_str());
+    Serial.printf("  MerchantKey: %s\n",cfg.payboard.merchantkey.c_str());
+    Serial.printf("  ApiHost: %s\n", cfg.payboard.apihost.c_str());
+    Serial.printf("  Apikey: %s\n",cfg.payboard.apikey.c_str());
     Serial.printf("  Mqtthost: %s\n",cfg.payboard.mqtthost.c_str());
     Serial.printf("  Mqttport: %d\n",cfg.payboard.mqttport);
     Serial.printf("  Mqttuser: %s\n",cfg.payboard.mqttuser.c_str());
@@ -509,4 +540,54 @@ void blinkGPIO(int pin, int btime){
         digitalWrite(pin,HIGH);
         delay(btime);
     }
+}
+
+
+void WiFiinfo(void){
+      Serial.printf("\nWiFi Connect to\n");
+      Serial.print("   SSID: ");
+      Serial.println(WiFi.SSID());
+      Serial.print("   IP: ");
+      Serial.println(WiFi.localIP());
+      Serial.println();
+
+      WiFi.softAPConfig(SoftAP_IP, SoftAP_GW, SoftAP_SUBNET);
+      WiFi.softAP( SoftAP_NAME.c_str(),"1100110011",8,false,2 );
+      Serial.print("   Soft-AP Name : ");
+      Serial.println(WiFi.softAPSSID());
+    
+      Serial.print("   Soft-AP IP address : ");
+      Serial.println(WiFi.softAPIP());
+}
+
+
+int loadWIFICFG(Preferences nvcfg,Config &cfg){  
+  int inx=0;
+
+  Serial.printf("  Execute---loadWIFICFG Function\n");
+  nvcfg.begin("wificfg",false);
+    if(nvcfg.isKey("ssid1")){
+      cfg.wifissid[0].ssid = nvcfg.getString("ssid1");
+      cfg.wifissid[0].key = nvcfg.getString("key1");
+      Serial.printf("     Found ssid1: %s\n",cfg.wifissid[0].ssid.c_str());
+      inx++;
+    }
+    if(nvcfg.isKey("ssid2")){
+      cfg.wifissid[1].ssid = nvcfg.getString("ssid2");
+      cfg.wifissid[1].key = nvcfg.getString("key2");
+      Serial.printf("     Found ssid2: %s\n",cfg.wifissid[1].ssid.c_str());
+      inx++;
+    }
+  nvcfg.end();
+    return inx;
+}
+
+
+void printLocalTime(){
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    Serial.println("Failed to obtain time");
+    return;
+  }
+  Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
 }

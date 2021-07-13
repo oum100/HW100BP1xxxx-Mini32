@@ -1,10 +1,11 @@
 #include <Arduino.h>
 #include "startup.h"
-#include <time.h>
+
 
 #ifdef NVS
   #include <nvs_flash.h>
 #endif
+
 
 // #ifdef HW100BP10829V200
 //   byte OUTPUTPIN[] = {AD2,AD1,AD0,CTRLPULSE,ENCOIN,UNLOCK,BUZZ,GREEN_LED};
@@ -31,14 +32,22 @@ Config cfginfo;
 int price[3]={0,0,0};
 int stime[3]= {25,35,40};
 
+int coin=0;
 int coinValue=0;
 int pricePerCoin=0;
+int paymentby = 0;
+
 // int pb_mqttport=1883;
+int cfgState=0;
 int waitFlag = 0;
 bool dispflag=0;
+int stateflag = 0;
+
+int dispCount =0;
+
+//int bill=0;
 
 Timer serviceTime, waitTime, timeLeft, blinkWiFi;
-
 int8_t serviceTimeID,waitTimeID,timeLeftID, blinkWiFiID;
 
 WiFiMulti wifimulti;
@@ -48,15 +57,9 @@ PubSubClient mqclient(espclient);
 // String macaddr PROGMEM  = WiFi.macAddress();
 // String deviceID PROGMEM = getdeviceid();
 
-String SoftAP_NAME PROGMEM = "BT_" + getdeviceid();
-IPAddress SoftAP_IP(192,168,8,20);
-IPAddress SoftAP_GW(192,168,8,1);
-IPAddress SoftAP_SUBNET(255,255,255,0);
 
-int coin=0;
-//int bill=0;
-int paymentby = 0;
-int stateflag = 0;
+
+
 
 String ntpServer1 = "0.th.pool.ntp.org";
 String ntpServer2 = "1.th.pool.ntp.org";
@@ -69,8 +72,7 @@ String pbSubTopic PROGMEM = "payboard/"; //   payboard/<merchantid>/<uuid>
 
 
 byte keyPress; //*** for keep keypress value.
-byte cfgState=0;
-int dispCount =0;
+
 
 //WiFiUDP ntpUDP;
 //NTPClient timeClient(ntpUDP, "asia.pool.ntp.org", 25200, 60000);
@@ -153,16 +155,6 @@ void interrupt(){
 }
 
 
-void printLocalTime()
-{
-  struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) {
-    Serial.println("Failed to obtain time");
-    return;
-  }
-  Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
-}
-
 //*********************************** Setup is here. *********************************** 
 void setup(){
 
@@ -206,51 +198,48 @@ void setup(){
   interrupt();
 
   //Get WiFi Configuration
+  display.print("F1");
   Serial.printf("WiFi Connecting.....\n");
-  WiFi.mode(WIFI_AP_STA);
-  //Check WiFi Config from rom
-  cfgdata.begin("wificfg",false);
-    if(cfgdata.isKey("ssid")){
-      String ssid = cfgdata.getString("ssid");
-      String key = cfgdata.getString("key");
-      Serial.printf("SSID: %s, KEY: %s\n",ssid.c_str(),key.c_str());
-      wifimulti.addAP(ssid.c_str(),key.c_str());
-    }
-  cfgdata.end();
-  wifimulti.addAP("Home173-AIS","1100110011");
-  wifimulti.addAP("BTnet","1100110011");
 
-  //WiFi Setting
+  WiFi.mode(WIFI_AP_STA);
+  wifimulti.addAP("Home173-AIS","1100110011");
+  wifimulti.addAP("myWiFi","1100110011");
+  for(int i=0;i<loadWIFICFG(cfgdata,cfginfo);i++){
+    wifimulti.addAP(cfginfo.wifissid[i].ssid.c_str(),cfginfo.wifissid[i].key.c_str());
+    Serial.printf("AddAP SSID[%d]: %s, Key[%d]: %s\n",i+1,cfginfo.wifissid[i].ssid.c_str(),i+1,cfginfo.wifissid[i].key.c_str());
+  }
+  Serial.printf("Connection WiFi...\n");
   while(!WiFi.isConnected()){
     display.print("nF");
     digitalWrite(GREEN_LED,LOW);
     wifimulti.run();
     delay(2000);
   }
-
-  display.print("F1");
-  Serial.println("...Wifi Connected...");
+    blinkGPIO(WIFI_LED,400);
+  Serial.printf("WiFi Connected...");
   WiFiinfo();
-  delay(300);
-
-
+  
   display.print("F2");
-  initCFG(cfginfo);
-  //Preparing API data
+  Serial.printf("Load default configuration.\n");
+  initCFG(cfginfo); 
   cfginfo.deviceid = getdeviceid();
   cfginfo.asset.mac = WiFi.macAddress();
-  
 
   //**** Getting config from NV-RAM
-  getNVCFG(cfgdata,cfginfo);
-  showCFG(cfginfo);
+  cfgdata.begin("config",false);
+  if(cfgdata.isKey("merchantid")){
+    Serial.printf("Replace configuration by using NV-RAM\n");
+    getNVCFG(cfgdata,cfginfo);
+  }
+  cfgdata.end();
+
 
   int sz = sizeof(cfginfo.product)/sizeof(cfginfo.product[0]);
   for(int i=0;i<sz;i++){
-    Serial.printf("Before Stime[%d]: %d\n",i+1,stime[i]);
-    price[i] = cfginfo.product[i].price;
+    //Serial.printf("Before Stime[%d]: %d\n",i+1,stime[i]);
+    price[i] = int(cfginfo.product[i].price);
     //stime[i] = cfginfo.product[i].stime;
-    Serial.printf("After Stime[%d]: %d\n",i+1,stime[i]);
+    //Serial.printf("After Stime[%d]: %d\n",i+1,stime[i]);
   }
 
   //*** Set price per coin
@@ -270,10 +259,10 @@ void setup(){
 
     Serial.println(cfginfo.asset.mac);
     payboard backend;
-    backend.uri_register = cfginfo.backend.apihost + "/v1.0/device/register";
+    backend.uri_register = cfginfo.payboard.apihost + "/v1.0/device/register";
     backend.merchantID=cfginfo.payboard.merchantid;
     backend.merchantKEY=cfginfo.payboard.merchantkey;
-    backend.appkey=cfginfo.backend.apikey;
+    backend.appkey=cfginfo.payboard.apikey;
 
     int rescode = backend.registerDEV(cfginfo.asset.mac.c_str(),cfginfo.payboard.uuid);
     Serial.printf("uuid now: "); Serial.println(cfginfo.payboard.uuid);
@@ -285,6 +274,9 @@ void setup(){
     }
   }
   cfgdata.end();
+  showCFG(cfginfo);
+
+
 
   // Set mqtt parameter
   pbPubTopic = pbPubTopic  + String(cfginfo.payboard.merchantid) +"/"+ String(cfginfo.payboard.uuid);
@@ -297,7 +289,7 @@ void setup(){
     wifimulti.run();
     delay(2000);
   }
-  blinkGPIO(GREEN_LED,300); 
+  blinkGPIO(GREEN_LED,400); 
 
   //**** Connecting MQTT
   display.print("F3");
@@ -786,7 +778,7 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     //Paid and then start service.
     Serial.printf("Response for action: paid.\n");
 
-    paymentby = 2;
+    paymentby = 2; // 1=coin, 2= qr, 3=kiosk , 4 = free
     int paidprice = doc["price"].as<int>();
     //String trans = doc["orderNo"].as<String>();
     cfginfo.asset.orderid = doc["orderNo"].as<String>();
@@ -804,21 +796,25 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
 
     //coinValue = paidprice;
   }else if(action == "countcoin"){
+    /*  Not use Jul64
     Serial.printf("Response for action: coincount.\n");
     //{"action":"countcoin","orderNo":"02210526162202176","price":"10.00"}
-    //*** two idea 1st: after insert coin machine work immediately.
-    //*** 2nd: machine not operate if cannot update to backend.
+    // two idea 1st: after insert coin machine work immediately.
+    // 2nd: machine not operate if cannot update to backend.
 
     String resmsg = doc["StatusCode"].as<String>();
     String msg = doc["Message"].as<String>();
     String trans = doc["ResultValues"]["transactionId"].as<String>();
+
+    cfginfo.asset.orderid = trans;
+
 
     doc["response"] = "countcoin";
     doc["merchantid"]=cfginfo.payboard.merchantid;
     doc["uuid"]=cfginfo.payboard.uuid;
     doc["state"]="accepted";
     doc["desc"]="accepted transaction: " + trans;
-
+    */
   }else if(action == "ping"){
 
     Serial.printf("response action PING\n");
@@ -915,13 +911,21 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     delay(500); 
 
   }else if(action == "setwifi"){
+    // {"action":"setwifi","index":"1","ssid":"Home173-AIS","key":"1100110011","reconnect":"1"}
+
     String ssid = doc["ssid"].as<String>();
     String key = doc["key"].as<String>();
-    bool wifireconn = doc["reconnect"].as<bool>();
-
+    int wifireconn = doc["reconnect"].as<int>();
+    int index = doc["index"].as<int>();
+    
     cfgdata.begin("wificfg",false);
-    cfgdata.putString("ssid",ssid);
-    cfgdata.putString("key",key);
+    cfgdata.putString(("ssid"+ (String)(index)).c_str(),ssid);
+    cfgdata.putString(("key"+ (String)(index)).c_str(),key);
+      Serial.printf("Setting WiFi with following\n");
+      Serial.print(("ssid"+ (String)(index))+": ");
+      Serial.println(cfgdata.getString(("ssid"+ (String)(index)).c_str()));
+      Serial.print(("key"+ (String)(index))+": ");
+      Serial.println(cfgdata.getString(("key"+ (String)(index)).c_str()));
     cfgdata.end();
 
     doc.clear();
@@ -952,13 +956,33 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
 
     (cfginfo.asset.coinModule == MULTI)?doc["desc"]="Change coinModule to: MULTI":doc["desc"]="Change coinModule to: SINGLE";
 
-  }else if(action == "backend"){
+  }else if(action == "orderid"){
 
+  }else if(action == "assettype"){  
+    // {"action":"assettype","assettype":"0"}
+
+    
+    cfginfo.asset.assettype = doc["assettype"].as<int>();
+    cfgdata.begin("config",false);
+    cfgdata.putInt("assettype",0);
+    cfgdata.end();
+
+    doc.clear();
+    doc["response"] = "assettype";
+    doc["merchantid"]=cfginfo.payboard.merchantid;
+    doc["uuid"]=cfginfo.payboard.uuid;
+    doc["state"]="changed"; 
+    if(cfginfo.asset.assettype){// 1 = Dryer
+      doc["desc"]="Set assetType to DRYER";
+    }else{// 0 = Washer
+      doc["desc"]="Set assetType to WASHER";
+    }
+    
   }else if(action == "payboard"){// To set payboard parameter
     String params = doc["params"];
 
     cfgdata.begin("config",false);
-    if(params == "all"){
+    if(params.equals("all")){
         cfginfo.payboard.uuid = doc["uuid"].as<String>();
         cfgdata.putString("uuid",cfginfo.payboard.uuid);
       
@@ -981,20 +1005,20 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
         cfgdata.putString("mqttuser",cfginfo.payboard.mqttuser);
         cfgdata.putString("mqttpass",cfginfo.payboard.mqttpass);
     }else{
-      if(params == "uuid"){
+      if(params.equals("uuid")){
         cfginfo.payboard.uuid = doc["uuid"].as<String>();
         cfgdata.putString("uuid",cfginfo.payboard.uuid);
-      }else if(params == "merchantid"){
+      }else if(params.equals("merchantid")){
         cfginfo.payboard.merchantid = doc["merchantid"].as<String>();;
         cfginfo.payboard.merchantkey = doc["merchantkey"].as<String>();
         cfgdata.putString("merchantid",cfginfo.payboard.merchantid);
         cfgdata.putString("merchantkey",cfginfo.payboard.merchantkey);
-      }else if(params == "apihost"){
+      }else if(params.equals("apihost")){
         cfginfo.payboard.apihost = doc["apihost"].as<String>();
         cfginfo.payboard.apikey = doc["apikey"].as<String>();
         cfgdata.putString("apihost",cfginfo.payboard.apihost);
         cfgdata.putString("apikey",cfginfo.payboard.apikey);
-      }else if(params == "mqtthost"){
+      }else if(params.equals("mqtthost")){
         cfginfo.payboard.mqtthost = doc["mqtthost"].as<String>();
         cfginfo.payboard.mqttport = doc["mqttportt"].as<int>();
         cfginfo.payboard.mqttuser = doc["mqttuser"].as<String>();
@@ -1006,7 +1030,7 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
       }
     }
     cfgdata.end();
-  }else if(action == "orderid"){
+  }else if(action == "backend"){
 
   }else if(action == "stateflag"){ //stateflag is flag for mark action before reboot  ex 1 is for reboot action, 2 for ota action
 
@@ -1014,11 +1038,14 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     //stateflag = 0;
     //orderid ="";
     //cfgStatte = 3;
+    //waitFlag =0;
+    //dispflag = 0;
+
   }else if(action == "jobcreate"){
     coinValue = doc["price"].as<int>();
-    paymentby = doc["paymentby"].as<int>();  //1 = coin , 2 = qr, 3 = free
+    paymentby = doc["paymentby"].as<int>();  //1 = coin , 2 = qr, 3 = kiosk , 4 = free
 
-    Serial.print("Waitflag: ");
+    Serial.print("waitFlag: ");
     Serial.println(waitFlag);
 
     doc.clear();
@@ -1028,6 +1055,21 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     doc["state"]="created";
     doc["desc"]="Manual create job.";
 
+  }else if(action == "nvsdelete"){
+    String msg;
+
+    Serial.printf("NVS size before delete: %d\n",cfgdata.freeEntries());
+    nvs_flash_erase(); // erase the NVS partition and...
+    nvs_flash_init(); // initialize the NVS partition.
+    msg = "NVS size after delete: "+ (String)cfgdata.freeEntries();
+    Serial.println(msg);
+
+    doc.clear();
+    doc["response"] = "nvsdelete";
+    doc["merchantid"]=cfginfo.payboard.merchantid;
+    doc["uuid"]=cfginfo.payboard.uuid;
+    doc["state"]="deleted";
+    doc["desc"]=msg;    
   }
 
   serializeJson(doc,jsonmsg);
@@ -1068,25 +1110,6 @@ void pbBackendMqtt(){
       mqclient.subscribe(pbSubTopic.c_str());
       Serial.printf("   Subscribe Topic: %s\n",pbSubTopic.c_str());
     }        
-}
-
-
-
-void WiFiinfo(){
-      Serial.printf("\nWiFi Connect to\n");
-      Serial.print("   SSID: ");
-      Serial.println(WiFi.SSID());
-      Serial.print("   IP: ");
-      Serial.println(WiFi.localIP());
-      Serial.println();
-
-      WiFi.softAPConfig(SoftAP_IP, SoftAP_GW, SoftAP_SUBNET);
-      WiFi.softAP( SoftAP_NAME.c_str(),"1100110011",8,false,2 );
-      Serial.print("   Soft-AP Name : ");
-      Serial.println(WiFi.softAPSSID());
-    
-      Serial.print("   Soft-AP IP address : ");
-      Serial.println(WiFi.softAPIP());
 }
 
 

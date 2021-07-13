@@ -39,7 +39,7 @@ struct Asset{
     String user;
     String pass;
     int coinModule;
-    int assettype;
+    int assettype; //***  0=Washer , 1 = Dryer
 };
 
 struct Backend{
@@ -96,7 +96,9 @@ void showCFG(Config &cfg);
 
 void getNVCFG(Preferences nvcfg, Config &cfg);
 
-
+int loadWIFICFG(Preferences nvcfg,Config &cfg);
+void printLocalTime();
+void WiFiinfo(void);
 
 
 #endif
