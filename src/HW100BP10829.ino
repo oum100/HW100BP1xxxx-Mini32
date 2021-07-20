@@ -229,14 +229,22 @@ void setup(){
   display.print("F2");
   Serial.printf("Load default configuration.\n");
   initCFG(cfginfo); 
+
   cfginfo.deviceid = getdeviceid();
   cfginfo.asset.mac = WiFi.macAddress();
+  Serial.println();
+  Serial.printf("Device ID: %s\n",cfginfo.deviceid.c_str());
+  Serial.printf("MacAddress: %s\n",cfginfo.asset.mac.c_str());
+
+ 
 
   //**** Getting config from NV-RAM
   cfgdata.begin("config",false);
   if(cfgdata.isKey("merchantid")){
-    Serial.printf("Replace configuration by using NV-RAM\n");
-    getNVCFG(cfgdata,cfginfo);
+    cfginfo.payboard.merchantid = cfgdata.getString("merchantid");
+  }
+  if(cfgdata.isKey("sku1")){
+    getnvProduct(cfgdata,cfginfo);
   }
   cfgdata.end();
 
@@ -754,6 +762,8 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
 
     cfgdata.begin("config",false);
 
+    cfgdata.putString("merchantid",cfginfo.payboard.merchantid);
+
     for(int x=0;x<(3-sz);x++){
       Serial.printf(" delete index: %d\n",3-x);
       cfgdata.putString(("sku"+ String(3-x)).c_str(),"");
@@ -800,14 +810,15 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     Serial.printf("Response for action: paid.\n");
 
     paymentby = 2; // 1=coin, 2= qr, 3=kiosk , 4 = free
-    int paidprice = doc["price"].as<int>();
-    //String trans = doc["orderNo"].as<String>();
+    //int paidprice = doc["price"].as<int>();
+
+    coinValue = doc["price"].as<int>();
     cfginfo.asset.orderid = doc["orderNo"].as<String>();
     // cfgdata.begin("config",false);
     // cfgdata.putString("orderid",cfginfo.asset.orderid);
     // cfgdata.end();
   
-    Serial.printf(" Customer paid for: %d\n",paidprice);
+    Serial.printf(" Customer paid for: %d\n",coinValue);
     doc.clear();
     doc["response"] = "paid";
     doc["merchantid"]=cfginfo.payboard.merchantid;
@@ -886,6 +897,7 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
 
   }else if(action == "ota"){
     WiFiClientSecure clientForOta;
+    int updatedFlag =0;
 
     esp32OTA._host="www.flipup.net"; //e.g. example.com
     esp32OTA._descriptionOfFirmwareURL="/firmware/HW100BP10829/firmware.json"; //e.g. /my-fw-versions/firmware.json
@@ -894,27 +906,36 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
   
     bool shouldExecuteFirmwareUpdate=esp32OTA.execHTTPSCheck();
     if(shouldExecuteFirmwareUpdate){
-      cfginfo.asset.firmware = esp32OTA._firwmareVersion.c_str();      
-      //saveCFG(cfginfo,LITTLEFS);   (13Jul64)
-      
-      //set stateflag = 2 flag
-      cfgdata.begin("config",false);
-      cfgdata.putInt("stateflag",2);
-      cfgdata.end();
+      updatedFlag = esp32OTA.executeOTA();
+      if(updatedFlag == 1){
+        cfginfo.asset.firmware = esp32OTA._firwmareVersion.c_str();      
+        
+        //set stateflag = 2 flag
+        cfgdata.begin("config",false);
+        cfgdata.putInt("stateflag",2);
+        cfgdata.putString("firmware",cfginfo.asset.firmware);
+        cfgdata.end();
 
-      doc.clear();
-      doc["response"] = "ota";
-      doc["merchantid"]=cfginfo.payboard.merchantid;
-      doc["uuid"]=cfginfo.payboard.uuid;
-      doc["firmware"] = esp32OTA._firwmareVersion;
-      doc["state"] = "accepted";
-      doc["disc"] = "Firmware upgrading then rebooting in few second."; 
-      serializeJson(doc,jsonmsg);
-      Serial.print("Jsonmsg: ");Serial.println(jsonmsg);
-      Serial.print("Ver: "); Serial.println(esp32OTA._firwmareVersion);
+        doc.clear();
+        doc["response"] = "ota";
+        doc["merchantid"]=cfginfo.payboard.merchantid;
+        doc["uuid"]=cfginfo.payboard.uuid;
+        doc["firmware"] = esp32OTA._firwmareVersion;
+        doc["state"] = "accepted";
+        doc["disc"] = "Firmware upgrading then rebooting in few second."; 
 
-      Serial.println("Firmware updating, It's will take few second");
-      esp32OTA.executeOTA();
+        serializeJson(doc,jsonmsg);
+        Serial.print("Jsonmsg: ");Serial.println(jsonmsg);
+        Serial.print("Ver: "); Serial.println(esp32OTA._firwmareVersion);
+        Serial.println("Firmware updating, It's will take few second");
+        
+      }else{
+        doc["merchanttid"] = cfginfo.payboard.merchantid;
+        doc["uuid"] = cfginfo.payboard.uuid;
+        doc["response"] = "ota";
+        doc["state"] = "FAILED";
+        doc["desc"] = "Firmware update failed, Error code:" + String(updatedFlag); 
+      }
     }else{
       doc["merchanttid"] = cfginfo.payboard.merchantid;
       doc["uuid"] = cfginfo.payboard.uuid;
@@ -930,6 +951,7 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     }
     mqclient.publish(pbPubTopic.c_str(),jsonmsg.c_str());
     delay(500); 
+    ESP.restart();
 
   }else if(action == "setwifi"){
     // {"action":"setwifi","index":"1","ssid":"Home173-AIS","key":"1100110011","reconnect":"1"}
@@ -1001,6 +1023,7 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     
   }else if(action == "payboard"){// To set payboard parameter
     String params = doc["params"];
+    bool merchantflag = 0;
 
     cfgdata.begin("config",false);
     if(params.equals("all")){
@@ -1026,19 +1049,25 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
         cfgdata.putString("mqttuser",cfginfo.payboard.mqttuser);
         cfgdata.putString("mqttpass",cfginfo.payboard.mqttpass);
     }else{
+    
       if(params.equals("uuid")){
         cfginfo.payboard.uuid = doc["uuid"].as<String>();
         cfgdata.putString("uuid",cfginfo.payboard.uuid);
       }else if(params.equals("merchantid")){
+        // {"action":"payboard","params":"merchantid","merchantid":""}
         cfginfo.payboard.merchantid = doc["merchantid"].as<String>();;
-        cfginfo.payboard.merchantkey = doc["merchantkey"].as<String>();
         cfgdata.putString("merchantid",cfginfo.payboard.merchantid);
-        cfgdata.putString("merchantkey",cfginfo.payboard.merchantkey);
+        merchantflag = true;
+      }else if(params.equals("merchantkey")){
+        // {"action":"payboard","params":"merchantid","merchantkey":""}
+        cfginfo.payboard.merchantkey = doc["merchantkey"].as<String>();
+        cfgdata.putString("merchantkey",cfginfo.payboard.merchantkey);    
       }else if(params.equals("apihost")){
         cfginfo.payboard.apihost = doc["apihost"].as<String>();
-        cfginfo.payboard.apikey = doc["apikey"].as<String>();
         cfgdata.putString("apihost",cfginfo.payboard.apihost);
-        cfgdata.putString("apikey",cfginfo.payboard.apikey);
+      }else if(params.equals("apikey")){
+        cfginfo.payboard.apikey = doc["apikey"].as<String>();
+        cfgdata.putString("apikey",cfginfo.payboard.apikey);  
       }else if(params.equals("mqtthost")){
         cfginfo.payboard.mqtthost = doc["mqtthost"].as<String>();
         cfginfo.payboard.mqttport = doc["mqttportt"].as<int>();
@@ -1051,6 +1080,15 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
       }
     }
     cfgdata.end();
+    doc.clear();
+    doc["response"] = "payboard";
+    doc["merchantid"]=cfginfo.payboard.merchantid;
+    doc["uuid"]=cfginfo.payboard.uuid;
+    doc["state"]="changed"; 
+    if(merchantflag){
+      mqclient.disconnect();
+    }
+    
   }else if(action == "backend"){
 
   }else if(action == "stateflag"){ //stateflag is flag for mark action before reboot  ex 1 is for reboot action, 2 for ota action

@@ -68,7 +68,7 @@ void initOUTPUT(int inx,byte *pin);
 void initINPUT(int inx, byte *pin);
 void blinkGPIO(int pin, int btime);
 
-void initCFG(Config &cfg);
+
 String cfgJSON(Config &cfg);
 void cfgJSON2(Config &cfg,String &jsoncfg);
 void readCFG(Config &cfg,String &jsoncfg);
@@ -92,8 +92,13 @@ void assetJSON2(Config &cfg,String &jsconfig);
 String  backendJSON(Config &cfg);
 void backendJSON2(Config &cfg,String &jsconfig);
 
+void initCFG(Config &cfg);
 void showCFG(Config &cfg);
 
+void getnvPbCFG(Preferences nvcfg, Config &cfg);
+void getnvBackend(Preferences nvcfg, Config &cfg);
+void getnvAssetCFG(Preferences nvcfg, Config &cfg);
+void getnvProduct(Preferences nvcfg, Config &cfg);
 void getNVCFG(Preferences nvcfg, Config &cfg);
 
 int loadWIFICFG(Preferences nvcfg,Config &cfg);
