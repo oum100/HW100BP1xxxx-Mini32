@@ -32,6 +32,7 @@ void getnvAssetCFG(Preferences nvcfg, Config &cfg){
   Serial.printf("  Getting Asset Configuration from NV\n");
   nvcfg.begin("config",false);
     cfg.asset.assetid = nvcfg.getString("assetid");
+    cfg.asset.merchantid = nvcfg.getString("merchanid");
     cfg.asset.orderid = nvcfg.getString("orderid");
     cfg.asset.firmware = nvcfg.getString("firmware");
     cfg.asset.coinModule = nvcfg.getInt("coinModule");
@@ -84,6 +85,10 @@ void getNVCFG(Preferences nvcfg, Config &cfg){
 
         if(nvcfg.isKey("assetid")){
             cfg.asset.assetid = nvcfg.getString("assetid");
+        }
+
+        if(nvcfg.isKey("merchantid")){
+            cfg.asset.merchantid = nvcfg.getString("merchantid");
         }
 
         if(nvcfg.isKey("orderid")){
@@ -171,6 +176,7 @@ void initCFG(Config &cfg){
 
 
     cfg.asset.assetid="";
+    cfg.asset.merchantid="07202100001";
     cfg.asset.orderid="";
     cfg.asset.assettype=DRYER; // 0 = WASHER, 1 = DRYER
     cfg.asset.coinModule=SINGLE; //  SINGLE=0, MULTI=1
@@ -279,6 +285,7 @@ String assetJSON(Config &cfg){
     doc["deviceid"] = cfg.deviceid;
 
     doc["asset"]["assetid"] = cfg.asset.assetid;
+    doc["asset"]["merchantid"]=cfg.asset.merchantid;
     doc["asset"]["coinModule"]=cfg.asset.coinModule;
     doc["asset"]["mac"]=cfg.asset.mac;
     doc["asset"]["model"]=cfg.asset.model;
@@ -321,6 +328,7 @@ String cfgJSON(Config &cfg){
     doc["deviceid"] = cfg.deviceid;
 
     doc["asset"]["assetid"] = cfg.asset.assetid;
+    doc["asset"]["merchantid"]=cfg.asset.merchantid;
     doc["asset"]["coinModule"]=cfg.asset.coinModule;
     doc["asset"]["mac"]=cfg.asset.mac;
     doc["asset"]["model"]=cfg.asset.model;
@@ -383,6 +391,7 @@ void readAssetCFG(Config &cfg,String &jsoncfg){
 
     cfg.deviceid = doc["deviceid"].as<String>();
     cfg.asset.assetid = doc["asset"]["assetid"].as<String>();
+    cfg.asset.merchantid = doc["asset"]["merchantid"].as<String>();
     cfg.asset.mac = doc["asset"]["mac"].as<String>();
     cfg.asset.model = doc["asset"]["model"].as<String>();
     cfg.asset.firmware = doc["asset"]["firmware"].as<String>();
@@ -479,6 +488,7 @@ void readCFG(Config &cfg,String &jsoncfg){
     cfg.header = doc["header"].as<String>();
 
     cfg.asset.assetid = doc["asset"]["assetid"].as<String>();
+    cfg.asset.merchantid = doc["asset"]["merchantid"].as<String>();
     cfg.asset.mac = doc["asset"]["mac"].as<String>();
     cfg.asset.model = doc["asset"]["model"].as<String>();
     cfg.asset.firmware = doc["asset"]["firmware"].as<String>();
@@ -520,6 +530,7 @@ void showCFG(Config &cfg){
 
     Serial.printf("\nAsset Configuration\n");
     Serial.printf("  AssetID: %s\n",cfg.asset.assetid.c_str());
+    Serial.printf("  MerchantID: %s\n",cfg.asset.merchantid.c_str());
     Serial.printf("  Orderid: %s\n",cfg.asset.orderid.c_str());
     Serial.printf("  CoinType: %d\n",cfg.asset.coinModule);
     Serial.printf("  AssetType: %d\n",cfg.asset.assettype);

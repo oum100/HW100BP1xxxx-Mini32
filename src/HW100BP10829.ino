@@ -25,7 +25,7 @@ Config cfginfo;
 // String pb_mqttpass;
 
 int price[3]={0,0,0};
-int stime[3]= {25,35,40};
+int stime[3]= {25,30,40};  // Actual 23, 28, 38
 
 int coin=0;
 int coinValue=0;
@@ -49,10 +49,12 @@ WiFiMulti wifimulti;
 WiFiClient espclient;
 PubSubClient mqclient(espclient);
 
-// String macaddr PROGMEM  = WiFi.macAddress();
-// String deviceID PROGMEM = getdeviceid();
 
-
+#define FLIPUPMQTT
+#ifdef FLIPUPMQTT
+  WiFiClient fpclient;
+  PubSubClient mqflipup(fpclient);
+#endif
 
 
 
@@ -65,6 +67,10 @@ String pbRegTopic PROGMEM = "payboard/register";
 String pbPubTopic PROGMEM = "payboard/backend/"; // payboard/backend/<merchantid>/<uuid>
 String pbSubTopic PROGMEM = "payboard/"; //   payboard/<merchantid>/<uuid>
 
+#ifdef FLIPUPMQTT
+String fpPubTopic PROGMEM = "/flipup/backend";
+String fpSubTopic PROGMEM = "/flipup/";
+#endif
 
 byte keyPress; //*** for keep keypress value.
 
@@ -79,7 +85,7 @@ String timeStamp;
 int timeRemain=0;
 
 
-secureEsp32FOTA esp32OTA("HW100BP10829", "1.0.0");
+secureEsp32FOTA esp32OTA("HW100BP10829", "");
 
 gpio_config_t io_config;
 xQueueHandle gpio_evt_queue = NULL;
@@ -139,7 +145,7 @@ void interrupt(){
     gpio_evt_queue = xQueueCreate(10, sizeof(long));
 
     /*********** Set GPIO handler task ************/
-    xTaskCreate(gpio_task, "gpio_task", 1024, NULL, 10, NULL);
+    xTaskCreate(gpio_task, "gpio_task",2048, NULL, 10, NULL);
 
     //install gpio isr service
     gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
@@ -182,7 +188,8 @@ void setup(){
   //*** initial 7Segment Display
   display.begin();
   display.setBacklight(30);
-  display.print("F0");
+  display.print("St"); //Setup
+  delay(200);
  
  
   //*** Initial GPIO
@@ -205,7 +212,8 @@ void setup(){
   interrupt();
 
   //Get WiFi Configuration
-  display.print("F1");
+  display.print("Cn"); //Config Network
+  delay(200);
   Serial.printf("WiFi Connecting.....\n");
 
   WiFi.mode(WIFI_AP_STA);
@@ -226,12 +234,16 @@ void setup(){
   Serial.printf("WiFi Connected...");
   WiFiinfo();
   
-  display.print("F2");
+  display.print("LC"); //Load Config
+  delay(200);
   Serial.printf("Load default configuration.\n");
   initCFG(cfginfo); 
 
   cfginfo.deviceid = getdeviceid();
+  cfginfo.asset.assetid = cfginfo.deviceid;
   cfginfo.asset.mac = WiFi.macAddress();
+
+
   Serial.println();
   Serial.printf("Device ID: %s\n",cfginfo.deviceid.c_str());
   Serial.printf("MacAddress: %s\n",cfginfo.asset.mac.c_str());
@@ -271,7 +283,8 @@ void setup(){
     cfginfo.payboard.uuid = cfgdata.getString("uuid","").c_str();
   }else{//Device not register
     Serial.printf("Device not register\n");
-
+    display.print("df"); // Device Failed
+    delay(200);
     Serial.println(cfginfo.asset.mac);
     payboard backend;
     backend.uri_register = cfginfo.payboard.apihost + "/v1.0/device/register";
@@ -297,6 +310,11 @@ void setup(){
   pbPubTopic = pbPubTopic  + String(cfginfo.payboard.merchantid) +"/"+ String(cfginfo.payboard.uuid);
   pbSubTopic = pbSubTopic + String(cfginfo.payboard.merchantid) +"/"+ String(cfginfo.payboard.uuid);
 
+  #ifdef FLIPUPMQTT
+  fpPubTopic = fpPubTopic + String(cfginfo.asset.merchantid) +"/"+ String(cfginfo.asset.assetid);
+  fpSubTopic = fpSubTopic + String(cfginfo.asset.merchantid) +"/"+ String(cfginfo.asset.assetid);
+  #endif
+
   //Keep WiFi connection
   while(!WiFi.isConnected()){
     display.print("nF");
@@ -307,12 +325,17 @@ void setup(){
   blinkGPIO(GREEN_LED,400); 
 
   //**** Connecting MQTT
-  display.print("F3");
+  display.print("HF"); // Host Failed
+  delay(200);
   pbBackendMqtt();
   
+  #ifdef FLIPUPMQTT
+  fpBackendMqtt();
+  #endif
 
   //*** Set NTP
-  display.print("F4");
+  display.print("tF"); //Time Failed
+  delay(200);
   Serial.printf("\nConnecting to TimeServer --> ");
   configTime(6*3600,3600,ntpServer1.c_str(),ntpServer2.c_str());
   printLocalTime();
@@ -323,18 +346,22 @@ void setup(){
   cfgdata.putString("timestamp",ctime(&tnow));
   cfgdata.end();
   DBprintf("Lastest booting: (%ld) -> %s.\n",tnow,ctime(&tnow));
-
+  delay(500);
 
   //******  Check stateflag 
-  display.print("F5");
+  display.print("SF"); //StateFlag
+  delay(200);
   cfgdata.begin("config",false);
   if(cfgdata.isKey("stateflag")){
     stateflag = cfgdata.getInt("stateflag",0);
-    Serial.printf("stateflag before: %d\n",stateflag);
+    Serial.printf("Stateflag now: %d\n",stateflag);
     String jsonmsg;
     StaticJsonDocument<100> doc;
 
     if(stateflag == 1){ // After Action Reboot
+
+      Serial.printf("Before reboot stateflag: %d\n",stateflag);
+
       doc["response"]="reboot";
       doc["merchantid"]=cfginfo.payboard.merchantid;
       doc["uuid"]=cfginfo.payboard.uuid;
@@ -346,11 +373,21 @@ void setup(){
       }else{
         mqclient.publish(pbPubTopic.c_str(),jsonmsg.c_str());
       }
+
+      #ifdef FLIPUPMQTT
+        if(!mqflipup.connected()){
+          fpBackendMqtt();
+        }else{
+          mqflipup.publish(fpPubTopic.c_str(),jsonmsg.c_str());
+        }
+      #endif
+
       cfgdata.putInt("stateflag",0);
       stateflag = 0;
-      Serial.printf("stateflag after: %d\n",stateflag);
+      Serial.printf("After reboot stateflag: %d\n",stateflag);
       cfgState = 3;
     }else if(stateflag ==2){ // After Action OTA
+      Serial.printf("Before OTA stateflag: %d\n",stateflag);
       doc["response"]="ota";
       doc["merchantid"]=cfginfo.payboard.merchantid;
       doc["uuid"]=cfginfo.payboard.uuid;
@@ -363,39 +400,45 @@ void setup(){
       }else{
         mqclient.publish(pbPubTopic.c_str(),jsonmsg.c_str());
       }
+
+      #ifdef FLIPUPMQTT
+        if(!mqflipup.connected()){
+          fpBackendMqtt();
+        }else{
+          mqflipup.publish(fpPubTopic.c_str(),jsonmsg.c_str());
+        }
+      #endif
+
+
       cfgdata.putInt("stateflag",0);
       stateflag = 0;
-      Serial.printf("stateflag after: %d\n",stateflag);
+      Serial.printf("After OTA stateflag: %d\n",stateflag);
       cfgState=3;
     }else if(stateflag == 5){ // Last Service not finish but may be power off.
-      display.print("PE"); //Power Outage Event
+      Serial.printf("Before resume stateflag: %d\n",stateflag);
+      display.print("PF"); //Power Outage Event
+      delay(200);
       cfgState = stateflag;
       dispflag = 1;
       timeRemain = cfgdata.getInt("timeremain",0);
       Serial.printf("Not finish job found with [%d] minutes remain.\n",timeRemain);
       
-      switch(cfginfo.asset.assettype){
-        case WASHER:   // 0 =  Washing Machine
-          if(!digitalRead(PROG1)){ // Check is machine running by read LED if 0=running  , 1 = off
-          //if(isHome(PROG1)){ //Machine on service
-            Serial.printf("Resuming job for orderID: %s\n",cfginfo.asset.orderid.c_str());
-            serviceTimeID = serviceTime.after(60*1000*timeRemain,serviceEnd);
-            timeLeftID = timeLeft.every(60*1000*1,serviceLeft);
-            //serviceEnd();
-          }else{
-            stateflag = 0;
-            cfgState = 3;
-            dispflag = 0;
-            timeRemain = 0;
-            cfgdata.putInt("stateflag",stateflag);
-            cfgdata.putInt("timeremmain",timeRemain);
-            Serial.printf("Recover power outage\n");
-          }
-          break;
-        case DRYER:   // 1 = Dryer Machine
-          break;
+      if(!digitalRead(PROG1)){ // Check is machine running by read LED if 0=running  , 1 = off
+      //if(isHome(PROG1)){ //Machine on service
+        Serial.printf("Resuming job for orderID: %s\n",cfginfo.asset.orderid.c_str());
+        serviceTimeID = serviceTime.after(60*1000*timeRemain,serviceEnd);
+        timeLeftID = timeLeft.every(60*1000*1,serviceLeft);
+        //serviceEnd();
+      }else{
+        stateflag = 0;
+        cfgState = 3;
+        dispflag = 0;
+        timeRemain = 0;
+        cfgdata.putInt("stateflag",stateflag);
+        cfgdata.putInt("timeremmain",timeRemain);
+        Serial.printf("Recover power outage\n");
       }
-
+      Serial.printf("After resume stateflag: %d\n",stateflag);
     }else{
       cfgState = 3;
     }
@@ -407,10 +450,12 @@ void setup(){
   }
   cfgdata.end();
 
-  display.print("F6");
-  Serial.printf("\n****************************************\n");
-  Serial.printf("\nSystem Ready for service.\n");    
-  delay(500);  
+  display.print("Fn");
+  delay(200);
+  Serial.printf("\n\n");
+  Serial.printf("******************************************************\n");
+  Serial.printf("*      System Ready for service. Firmware:%s      *\n",cfginfo.asset.firmware.c_str());  
+  Serial.printf("******************************************************\n");    
 } 
 //*--------------------------------- End of Setup. ---------------------------------*// 
 
@@ -475,15 +520,21 @@ void loop(){
       pbBackendMqtt();
     }
 
+    #ifdef FLIPUPMQTT
+      if(!mqflipup.connected() && (cfgState >= 2)){
+        fpBackendMqtt();
+      }    
+    #endif
+
     //Serial.printf("cfgState: %d\n",cfgState);
 
     switch(cfgState){
       case 1: //*** Not register not Configuration.
-          display.print("C1");
+          display.print("dC");
           pbRegisMqtt();
           break;
       case 2: //*** Register but activate from backend.
-          display.print("C2");
+          display.print("dA");
           //pbBackendMqtt();
           break;
       case 3: //*** get config from File System.
@@ -507,51 +558,41 @@ void loop(){
           }
           break;
       case 4: //*** After 1st coin insert
-          switch(cfginfo.asset.assettype){
-            case WASHER:// 0 = Washing Machine
-              if((coinValue == price[0]) && (waitFlag == 0)){\
-                waitFlag = 1;
-                //cfgState = 5;
-                Serial.printf("Program 1 :%d\n", coinValue);
-                waitTimeID=waitTime.after(60*1000*0.3,prog1start);
-                
-              }else if((coinValue == price[1]) && (waitFlag <= 1)){
-                waitTime.stop(waitTimeID);
-                waitFlag =2;
-                //cfgState = 5;
-                Serial.printf("Program 2 :%d\n", coinValue);
-                
-                waitTimeID=waitTime.after(60*1000*0.3,prog2start);
-                
-              }else if((coinValue == price[2]) && (waitFlag <= 2)){
-                display.setBacklight(30);
-                display.print(coinValue);
-                display.setColonOn(true);
-                delay(300);
+          if((coinValue == price[0]) && (waitFlag == 0)){\
+            waitFlag = 1;
+            //cfgState = 5;
+            Serial.printf("Program 1 :%d\n", coinValue);
+            timeRemain = stime[0]-1;
+            waitTimeID=waitTime.after(60*1000*0.3,progStart);
+            //waitTimeID=waitTime.after(60*1000*0.3,prog1start);
+            
+          }else if((coinValue == price[1]) && (waitFlag <= 1)){
+            waitTime.stop(waitTimeID);
+            waitFlag =2;
+            //cfgState = 5;
+            Serial.printf("Program 2 :%d\n", coinValue);
+            timeRemain = stime[1]-1;
+            waitTimeID=waitTime.after(60*1000*0.3,progStart);
+            //waitTimeID=waitTime.after(60*1000*0.3,prog2start);
+            
+          }else if((coinValue == price[2]) && (waitFlag <= 2)){
+            display.setBacklight(30);
+            display.print(coinValue);
+            display.setColonOn(true);
+            delay(300);
 
-                waitTime.stop(waitTimeID);
-                waitFlag= 3;
-                //cfgState = 5;
-                Serial.printf("Program 3 :%d\n", coinValue);
-                waitTimeID=waitTime.after(60*1000*0.3,prog3start);
-                //prog3start();
-              }else{
-                display.setBacklight(30);
-                display.print(coinValue);
-                display.setColonOn(true);
-              }
-
-              break;
-            case DRYER: // 1 = Dryer Machine
-              if(coinValue == price[0]){
-                Serial.printf("Dryer Program-1 for 60 mins :%d\n", coinValue);
-                waitTimeID=waitTime.after(60*1000*0.3,prog1start);
-              }else{
-                display.setBacklight(30);
-                display.print(coinValue);
-                display.setColonOn(true);
-              }
-              break;
+            waitTime.stop(waitTimeID);
+            waitFlag= 3;
+            //cfgState = 5;
+            Serial.printf("Program 3 :%d\n", coinValue);
+            timeRemain = stime[2]-1;
+            waitTimeID=waitTime.after(60*1000*0.3,progStart);
+            //waitTimeID=waitTime.after(60*1000*0.3,prog3start);
+            //prog3start();
+          }else{
+            display.setBacklight(30);
+            display.print(coinValue);
+            display.setColonOn(true);
           }
           break;
       case 5:
@@ -567,13 +608,19 @@ void loop(){
               case 1://Prog1
                 display.print("P1");
                 delay(300);
+                display.scrollingText("t-25",1);
+                delay(300);
                 break;
               case 2://Prog2
                 display.print("P2");
                 delay(300);
+                display.scrollingText("t-35",1);
+                delay(300);
                 break;
               case 3://Prog3
                 display.print("P3");
+                delay(300);
+                display.scrollingText("t-40",1);
                 delay(300);
                 break;
             }
@@ -606,6 +653,7 @@ void loop(){
     digitalWrite(GREEN_LED,LOW);
     digitalWrite(0,LOW);
     Serial.printf("WiFi Connecting.....\n");
+    display.print("nF");
     wifimulti.run();
      
     delay(1500);
@@ -623,15 +671,12 @@ void loop(){
   waitTime.update();
   timeLeft.update();
   mqclient.loop();
+  #ifdef FLIPUPMQTT
+   mqflipup.loop();
+  #endif
 
 }
 //*--------------------------------- End of LOOP. ---------------------------------*// 
-
-
-
-
-
-
 
 
 
@@ -673,7 +718,8 @@ void pbRegCallback(char* topic, byte* payload, unsigned int length){
       cfgdata.putString("uuid",cfginfo.payboard.uuid);
       cfgdata.end();
 
-      display.print("C2");
+      display.print("UC"); //UUID /config
+      delay(200);
       cfgState = 2; // Register 
     }
   }else{
@@ -803,7 +849,8 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     doc["desc"]="config saved";
     
     cfgState = 3;
-    display.print("C3");
+    display.print("AC");// Action /config
+    delay(200);
 
   }else if(action == "paid"){
     //Paid and then start service.
@@ -811,12 +858,20 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
 
     paymentby = 2; // 1=coin, 2= qr, 3=kiosk , 4 = free
     //int paidprice = doc["price"].as<int>();
-
     coinValue = doc["price"].as<int>();
+
+    if(coinValue == price[0]){
+      waitFlag = 0;
+    }else if(coinValue == price[1]){
+      waitFlag = 1;
+    }else if(coinValue == price[2]){
+      waitFlag = 2;
+    }
+
     cfginfo.asset.orderid = doc["orderNo"].as<String>();
-    // cfgdata.begin("config",false);
-    // cfgdata.putString("orderid",cfginfo.asset.orderid);
-    // cfgdata.end();
+    cfgdata.begin("config",false);
+    cfgdata.putString("orderid",cfginfo.asset.orderid);
+    cfgdata.end();
   
     Serial.printf(" Customer paid for: %d\n",coinValue);
     doc.clear();
@@ -826,7 +881,6 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     doc["state"]="accepted";
     doc["desc"]="accepted orderid: " + cfginfo.asset.orderid;
 
-    //coinValue = paidprice;
   }else if(action == "countcoin"){
     /*  Not use Jul64
     Serial.printf("Response for action: coincount.\n");
@@ -891,25 +945,30 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
       pbBackendMqtt();
     }
     mqclient.publish(pbPubTopic.c_str(),jsonmsg.c_str());
+
+   #ifdef FLIPUPMQTT
+      if(!mqflipup.connected()){
+        fpBackendMqtt();
+      }
+      mqflipup.publish(fpPubTopic.c_str(),jsonmsg.c_str());
+    #endif
+
     delay(500);    
     
     ESP.restart();
 
   }else if(action == "ota"){
     WiFiClientSecure clientForOta;
-    int updatedFlag =0;
 
     esp32OTA._host="www.flipup.net"; //e.g. example.com
     esp32OTA._descriptionOfFirmwareURL="/firmware/HW100BP10829/firmware.json"; //e.g. /my-fw-versions/firmware.json
     //esp32OTA._certificate=test_root_ca;
+    esp32OTA._firwmareVersion = cfginfo.asset.firmware;
     esp32OTA.clientForOta=clientForOta;
   
     bool shouldExecuteFirmwareUpdate=esp32OTA.execHTTPSCheck();
     if(shouldExecuteFirmwareUpdate){
-      updatedFlag = esp32OTA.executeOTA();
-      if(updatedFlag == 1){
         cfginfo.asset.firmware = esp32OTA._firwmareVersion.c_str();      
-        
         //set stateflag = 2 flag
         cfgdata.begin("config",false);
         cfgdata.putInt("stateflag",2);
@@ -928,31 +987,43 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
         Serial.print("Jsonmsg: ");Serial.println(jsonmsg);
         Serial.print("Ver: "); Serial.println(esp32OTA._firwmareVersion);
         Serial.println("Firmware updating, It's will take few second");
-        
-      }else{
-        doc["merchanttid"] = cfginfo.payboard.merchantid;
-        doc["uuid"] = cfginfo.payboard.uuid;
-        doc["response"] = "ota";
-        doc["state"] = "FAILED";
-        doc["desc"] = "Firmware update failed, Error code:" + String(updatedFlag); 
-      }
+
+        if(!mqclient.connected()){
+          pbBackendMqtt();
+        }
+        mqclient.publish(pbPubTopic.c_str(),jsonmsg.c_str());
+
+        #ifdef FLIPUPMQTT
+          if(!mqflipup.connected()){
+            fpBackendMqtt();
+          }
+          mqflipup.publish(fpPubTopic.c_str(),jsonmsg.c_str());
+        #endif
+
+        esp32OTA.executeOTA_REBOOT();
     }else{
       doc["merchanttid"] = cfginfo.payboard.merchantid;
       doc["uuid"] = cfginfo.payboard.uuid;
       doc["response"] = "ota";
       doc["state"] = "FAILED";
       doc["desc"] = "Firmware update failed, version may be the same."; 
+
+      serializeJson(doc,jsonmsg);
+      Serial.print("Jsonmsg: ");Serial.println(jsonmsg);
+      if(!mqclient.connected()){
+        pbBackendMqtt();
+      }
+      mqclient.publish(pbPubTopic.c_str(),jsonmsg.c_str());
+
+      #ifdef FLIPUPMQTT
+        if(!mqflipup.connected()){
+          fpBackendMqtt();
+        }
+        mqflipup.publish(fpPubTopic.c_str(),jsonmsg.c_str());
+      #endif
     }
 
-    serializeJson(doc,jsonmsg);
-    Serial.print("Jsonmsg: ");Serial.println(jsonmsg);
-    if(!mqclient.connected()){
-      pbBackendMqtt();
-    }
-    mqclient.publish(pbPubTopic.c_str(),jsonmsg.c_str());
-    delay(500); 
-    ESP.restart();
-
+    delay(1000);
   }else if(action == "setwifi"){
     // {"action":"setwifi","index":"1","ssid":"Home173-AIS","key":"1100110011","reconnect":"1"}
 
@@ -979,6 +1050,8 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     wifimulti.addAP(ssid.c_str(),key.c_str());
     if(wifireconn){
       WiFi.disconnect();
+      display.print("nF");
+      digitalWrite(GREEN_LED,LOW);
       wifimulti.run();
       doc["state"]="Reconnected";
       doc["desc"]="setWiFi completed  and reconnected";
@@ -1015,11 +1088,6 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     doc["merchantid"]=cfginfo.payboard.merchantid;
     doc["uuid"]=cfginfo.payboard.uuid;
     doc["state"]="changed"; 
-    if(cfginfo.asset.assettype){// 1 = Dryer
-      doc["desc"]="Set assetType to DRYER";
-    }else{// 0 = Washer
-      doc["desc"]="Set assetType to WASHER";
-    }
     
   }else if(action == "payboard"){// To set payboard parameter
     String params = doc["params"];
@@ -1087,6 +1155,9 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     doc["state"]="changed"; 
     if(merchantflag){
       mqclient.disconnect();
+      #ifdef FLIPUPMQTT
+        mqflipup.disconnect();
+      #endif
     }
     
   }else if(action == "backend"){
@@ -1129,6 +1200,18 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     doc["uuid"]=cfginfo.payboard.uuid;
     doc["state"]="deleted";
     doc["desc"]=msg;    
+  }else if(action == "selftest"){
+    String msg;
+
+    msg = "Machine Selftest finished";
+    Serial.printf("%s\n",msg.c_str());
+    selftest(AD0,AD1,AD2,CTRLPULSE);
+    doc.clear();
+    doc["response"] = "nvsdelete";
+    doc["merchantid"]=cfginfo.payboard.merchantid;
+    doc["uuid"]=cfginfo.payboard.uuid;
+    doc["state"]="deleted";
+    doc["desc"]=msg;    
   }
 
   serializeJson(doc,jsonmsg);
@@ -1140,13 +1223,40 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     pbBackendMqtt();
   }
   mqclient.publish(pbPubTopic.c_str(),jsonmsg.c_str());
+
+
+  #ifdef FLIPUPMQTT
+    if(!mqflipup.connected()){
+      fpBackendMqtt();
+    }
+    mqflipup.publish(fpPubTopic.c_str(),jsonmsg.c_str());
+  #endif
+
   delay(500);
 }
 
 
+#ifdef FLIPUPMQTT
+  void fpCallback(char* topic, byte* payload, unsigned int length){
+    pbCallback(topic,payload,length);
+  }
 
-
-
+void fpBackendMqtt(){
+    if(!mqflipup.connected()){
+      mqflipup.setServer(cfginfo.backend.mqtthost.c_str(),cfginfo.backend.mqttport);
+      mqflipup.setCallback(fpCallback);
+    
+      Serial.printf("Backend-2 Mqtt connecting ...");
+      while(!mqflipup.connect(cfginfo.deviceid.c_str(),cfginfo.backend.mqttuser.c_str(), cfginfo.backend.mqttpass.c_str())){
+        Serial.printf(".");
+        delay(500);
+      }
+      Serial.printf("connected\n");
+      mqflipup.subscribe(fpSubTopic.c_str());
+      Serial.printf("   Subscribe Topic: %s\n",fpSubTopic.c_str());
+    }        
+}
+#endif
 
 
 void pbBackendMqtt(){
@@ -1163,9 +1273,9 @@ void pbBackendMqtt(){
       mqclient.setCallback(pbCallback);
 
       
-      pbSubTopic = "payboard/" + String(cfginfo.payboard.merchantid) + "/" + String(cfginfo.payboard.uuid);
+      //pbSubTopic = "payboard/" + String(cfginfo.payboard.merchantid) + "/" + String(cfginfo.payboard.uuid);
     
-      Serial.printf("Backend Mqtt connecting ...");
+      Serial.printf("Backend-1 Mqtt connecting ...");
       while(!mqclient.connect(cfginfo.deviceid.c_str(),cfginfo.payboard.mqttuser.c_str(), cfginfo.payboard.mqttpass.c_str())){
         Serial.printf(".");
         delay(500);
@@ -1239,26 +1349,44 @@ void showPrice(SevenSegmentTM1637 &disp,int &count,byte max, byte min){
 }
 
 
-void prog1start(){
+
+
+void progStart(){
 
   payboard backend;
   String response;
   int rescode;
+  bool machineStart = false;
   
   digitalWrite(ENCOIN,LOW); // Disable Coin Module
 
+  switch(waitFlag){
+    case 1:
+      machineStart = startProg(1);
+      break;
+    case 2:
+      machineStart = startProg(2);
+      break;
+    case 3:
+      machineStart = startProg(3);
+      break;
+  }
+
   //if(1){   //Comment this row when production
-  if(startProg(1)){  //unComment this row when production
+  if(machineStart){  //unComment this row when production
     Serial.printf("Starting Prog1Start , Paymentby %d\n",paymentby);
     cfgState = 5;
     cfgdata.begin("config",false);
     cfgdata.putInt("stateflag",cfgState);
+    cfgdata.putInt("timeremain",timeRemain);
 
     backend.merchantID=cfginfo.payboard.merchantid;
     backend.merchantKEY=cfginfo.payboard.merchantkey;
     backend.appkey=cfginfo.payboard.apikey;
 
     while(!WiFi.isConnected()){
+      display.print("nF");
+      digitalWrite(GREEN_LED,LOW);
       wifimulti.run();
     }
 
@@ -1290,14 +1418,10 @@ void prog1start(){
     }
     cfgdata.end();
 
-    //startProg(1);
-
-    Serial.printf(" Program Time: %d\n",stime[0]);
-    //stime[0]=1; // for testing only
-    serviceTimeID=serviceTime.after((60*1000*stime[0]),serviceEnd);
-    timeRemain = stime[0];
+    Serial.printf(" Program Time: %d\n",timeRemain);
+    serviceTimeID=serviceTime.after((60*1000*timeRemain),serviceEnd);
     timeLeftID = timeLeft.every(60*1000*1,serviceLeft);
-    Serial.printf("On service of Program-1 for %d minutes\n",stime[0]);
+    Serial.printf("On service of Program-1 for %d minutes\n",timeRemain);
   }else{
     coin=0;
     coinValue=0;
@@ -1308,138 +1432,6 @@ void prog1start(){
 }
 
 
-void prog2start(){
-
-  payboard backend;
-  String response;
-  int rescode;
-
-  digitalWrite(ENCOIN,LOW);
-  //if(1){   //Comment this row when production
-  if(startProg(2)){    //unComment this row when production
-    Serial.printf("Starting Prog1Start., Paymentby %d\n",paymentby);
-    cfgState = 5;
-    cfgdata.begin("config",false);
-    cfgdata.putInt("stateflag",cfgState);
-
-    backend.merchantID=cfginfo.payboard.merchantid;
-    backend.merchantKEY=cfginfo.payboard.merchantkey;
-    backend.appkey=cfginfo.payboard.apikey;
-
-    while(!WiFi.isConnected()){
-      wifimulti.run();
-    }
-
-    switch(paymentby){
-      case 1: // by Coin
-        backend.uri_countCoin = cfginfo.payboard.apihost + "/v1.0/device/countcoin";
-        rescode = backend.coinCounter(cfginfo.payboard.uuid.c_str(),coinValue,response);
-        if(rescode == 200){
-          Serial.printf("Response trans: %s\n",response.c_str());
-          cfgdata.putString("orderid",response);
-        }else{
-          Serial.printf("Response code: %d\n",rescode);
-          Serial.printf("Response trans: %s\n",response.c_str());
-        }
-        break;
-      case 2:// by QR
-        cfgdata.putString("orderid",cfginfo.asset.orderid);
-        backend.uri_deviceStart = cfginfo.payboard.apihost + "/v1.0/device/start";
-        rescode = backend.deviceStart(cfginfo.asset.orderid.c_str(),response);
-
-        if(rescode == 200){
-          if(response == "success"){
-            Serial.printf("Pro1Start backend undated\n");
-          } 
-        }else{
-          Serial.printf("Rescode: %d\n",rescode);
-        }
-        break;
-    }
-    cfgdata.end();
-
-    //startProg(2);
-
-    Serial.printf(" Program Time: %d\n",stime[1]);
-    //stime[1]=1; // for testing only
-    serviceTimeID=serviceTime.after((60*1000*stime[1]),serviceEnd);
-    timeRemain = stime[1];
-    timeLeftID = timeLeft.every(60*1000*1,serviceLeft);
-    Serial.printf("On service of Program-2 for %d minutes\n",stime[1]);
-  }else{
-    coin=0;
-    coinValue=0;
-    cfgState = 6;
-    display.print("E2");
-    Serial.printf("Failed to start service of Program-2\n");
-  }
-}
-
-
-void prog3start(){
-
-  payboard backend;
-  String response;
-  int rescode;
-
-  digitalWrite(ENCOIN,LOW);
-  //if(1){   //Comment this row when production
-  if(startProg(3)){   //unComment this row when production
-    Serial.printf("Starting Prog1Start., Paymentby %d\n",paymentby);
-    cfgState = 5;
-    cfgdata.begin("config",false);
-    cfgdata.putInt("stateflag",cfgState);
-
-    backend.merchantID=cfginfo.payboard.merchantid;
-    backend.merchantKEY=cfginfo.payboard.merchantkey;
-    backend.appkey=cfginfo.payboard.apikey;
-
-    while(!WiFi.isConnected()){
-      wifimulti.run();
-    }
-
-    switch(paymentby){
-      case 1: // by Coin
-        backend.uri_countCoin = cfginfo.payboard.apihost + "/v1.0/device/countcoin";
-        rescode = backend.coinCounter(cfginfo.payboard.uuid.c_str(),coinValue,response);
-        if(rescode == 200){
-          Serial.printf("Response trans: %s\n",response.c_str());
-          cfgdata.putString("orderid",response);
-        }else{
-          Serial.printf("Response code: %d\n",rescode);
-          Serial.printf("Response trans: %s\n",response.c_str());
-        }
-        break;
-      case 2:// by QR
-        cfgdata.putString("orderid",cfginfo.asset.orderid);
-        backend.uri_deviceStart = cfginfo.payboard.apihost + "/v1.0/device/start";
-        rescode = backend.deviceStart(cfginfo.asset.orderid.c_str(),response);
-
-        if(rescode == 200){
-          if(response == "success"){
-            Serial.printf("Pro1Start backend undated\n");
-          } 
-        }else{
-          Serial.printf("Rescode: %d\n",rescode);
-        }
-        break;
-    }
-    cfgdata.end();
-    //startProg(3);
-    Serial.printf(" Program Time: %d\n",stime[2]);
-    //stime[2]=1; // for testing only
-    serviceTimeID=serviceTime.after((60*1000*stime[2]),serviceEnd);
-    timeRemain = stime[2];
-    timeLeftID = timeLeft.every(60*1000*1,serviceLeft);
-    Serial.printf("On service of Program-3 for %d minutes\n",stime[2]);
-  }else{
-    coin=0;
-    coinValue=0;
-    cfgState = 6;
-    display.print("E3");
-    Serial.printf("Failed to start service of Program-3\n");
-  }
-}
 
 void serviceLeft(){
   Serial.printf("Service Time remain: %d\n",--timeRemain);
@@ -1448,11 +1440,16 @@ void serviceLeft(){
   cfgdata.end();
 }
 
+
 void serviceEnd(){
+  payboard backend;
+  String response;
+  int rescode;
+
   timeLeft.stop(timeLeftID);
   if(digitalRead(PROG1)){ // digitalRead(PROG1) if get  0 = machine still running.
-    timeRemain = 0;
     coin=0;
+    timeRemain = 0;
     coinValue = 0;
     cfgState = 3;
     waitFlag = 0;
@@ -1464,6 +1461,35 @@ void serviceEnd(){
     cfgdata.putString("orderid","");
     cfgdata.putInt("timeremain",0);
     cfgdata.end();
+
+    backend.merchantID=cfginfo.payboard.merchantid;
+    backend.merchantKEY=cfginfo.payboard.merchantkey;
+    backend.appkey=cfginfo.payboard.apikey;
+
+
+    switch(paymentby){
+      case 1: // by  Coin
+        break;
+      case 2: // by QR
+        Serial.printf("Sending QR acknoloedge to backend\n");
+        cfgdata.putString("orderid",cfginfo.asset.orderid);
+        backend.uri_deviceStart = cfginfo.payboard.apihost + "/v1.0/device/stop";
+        rescode = backend.deviceStart(cfginfo.asset.orderid.c_str(),response);
+
+        if(rescode == 200){
+          if(response == "success"){
+            Serial.printf("Pro1Start backend undated\n");
+          } 
+        }else{
+          Serial.printf("Rescode: %d\n",rescode);
+        }
+        break;
+      case 3: // by Kiosk
+        break;
+      case 4: // by Admin
+        break;
+    }
+
     Serial.printf("Job Finish.  Poweroff machine soon.\n");
   }else{
     Serial.printf("Job still running. wait for one more minute\n");

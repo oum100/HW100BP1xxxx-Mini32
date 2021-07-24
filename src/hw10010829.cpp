@@ -139,9 +139,9 @@ void buttonCtrl( int button, int pulse, int duty){
   }
 }
 
-void selftest(int IO0,int IO1,int IO2, int CTRLSW){
-    int bb3=0,bb2=0,bb1=0,bb0=0;
-    for(int i = 0;i<16;i++){
+void selftest(int IO0,int IO1,int IO2, int CTRLSW){ //IO) GPIO addr bit 0, IO1 bit 1, IO2 bit2
+  int bb3=0,bb2=0,bb1=0,bb0=0;
+  for(int i = 0;i<16;i++){
     bcdconverter(i,&bb3,&bb2,&bb1,&bb0);
     Serial.println();
     Serial.printf("bitvalue: %i %i %i %i : %d    ",bb3,bb2,bb1,bb0,i);
@@ -149,9 +149,10 @@ void selftest(int IO0,int IO1,int IO2, int CTRLSW){
     digitalWrite(IO1,bb1);
     digitalWrite(IO0,bb0);
     digitalWrite(CTRLSW,HIGH);
-    delay(3000);
+    delay(1500);
     digitalWrite(CTRLSW,LOW);
     Serial.print("Done");
+    i==7?delay(1000):delay(0);
   }
 }
 
@@ -211,6 +212,8 @@ bool startProg(int prognum){
           buttonCtrl(TEMP,4,200);   //Set temp to 30degree;
           break;     
     }
+    delay(2000);
+    buttonCtrl(START,1,200);
     return true;
   }else{
     return false;
