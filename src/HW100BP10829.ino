@@ -217,7 +217,8 @@ void setup(){
   Serial.printf("WiFi Connecting.....\n");
 
   WiFi.mode(WIFI_AP_STA);
-  wifimulti.addAP("Home173-AIS","1100110011");
+  wifimulti.addAP("OYO Happylandn guest","12345678");
+  //wifimulti.addAP("Home173-AIS","1100110011");
   wifimulti.addAP("myWiFi","1100110011");
   for(int i=0;i<loadWIFICFG(cfgdata,cfginfo);i++){
     wifimulti.addAP(cfginfo.wifissid[i].ssid.c_str(),cfginfo.wifissid[i].key.c_str());
@@ -228,7 +229,7 @@ void setup(){
     display.print("nF");
     digitalWrite(GREEN_LED,LOW);
     wifimulti.run();
-    delay(2000);
+    //delay(2000);
   }
     blinkGPIO(WIFI_LED,400);
   Serial.printf("WiFi Connected...");
@@ -263,10 +264,10 @@ void setup(){
 
   int sz = sizeof(cfginfo.product)/sizeof(cfginfo.product[0]);
   for(int i=0;i<sz;i++){
-    //Serial.printf("Before Stime[%d]: %d\n",i+1,stime[i]);
+    Serial.printf("Before Stime[%d]: %d\n",i+1,stime[i]);
     price[i] = int(cfginfo.product[i].price);
-    //stime[i] = cfginfo.product[i].stime;
-    //Serial.printf("After Stime[%d]: %d\n",i+1,stime[i]);
+    stime[i] = cfginfo.product[i].stime;
+    Serial.printf("After Stime[%d]: %d\n",i+1,stime[i]);
   }
 
   //*** Set price per coin
@@ -304,8 +305,6 @@ void setup(){
   cfgdata.end();
   showCFG(cfginfo);
 
-
-
   // Set mqtt parameter
   pbPubTopic = pbPubTopic  + String(cfginfo.payboard.merchantid) +"/"+ String(cfginfo.payboard.uuid);
   pbSubTopic = pbSubTopic + String(cfginfo.payboard.merchantid) +"/"+ String(cfginfo.payboard.uuid);
@@ -320,33 +319,37 @@ void setup(){
     display.print("nF");
     digitalWrite(GREEN_LED,LOW);
     wifimulti.run();
-    delay(2000);
+    // delay(2000);
   }
-  blinkGPIO(GREEN_LED,400); 
 
-  //**** Connecting MQTT
-  display.print("HF"); // Host Failed
-  delay(200);
-  pbBackendMqtt();
+  if(WiFi.isConnected()){
+    blinkGPIO(GREEN_LED,400); 
+
+    //**** Connecting MQTT
+    display.print("HF"); // Host Failed
+    delay(200);
+    pbBackendMqtt();
+    
+    #ifdef FLIPUPMQTT
+    fpBackendMqtt();
+    #endif
+
   
-  #ifdef FLIPUPMQTT
-  fpBackendMqtt();
-  #endif
-
-  //*** Set NTP
-  display.print("tF"); //Time Failed
-  delay(200);
-  Serial.printf("\nConnecting to TimeServer --> ");
-  configTime(6*3600,3600,ntpServer1.c_str(),ntpServer2.c_str());
-  printLocalTime();
-  time_t tnow;
-  time(&tnow);
-  cfgdata.begin("lastboot",false);
-  cfgdata.putULong("epochtime",tnow);
-  cfgdata.putString("timestamp",ctime(&tnow));
-  cfgdata.end();
-  DBprintf("Lastest booting: (%ld) -> %s.\n",tnow,ctime(&tnow));
-  delay(500);
+    //*** Set NTP
+    display.print("tF"); //Time Failed
+    delay(200);
+    Serial.printf("\nConnecting to TimeServer --> ");
+    configTime(6*3600,3600,ntpServer1.c_str(),ntpServer2.c_str());
+    printLocalTime();
+    time_t tnow;
+    time(&tnow);
+    cfgdata.begin("lastboot",false);
+    cfgdata.putULong("epochtime",tnow);
+    cfgdata.putString("timestamp",ctime(&tnow));
+    cfgdata.end();
+    DBprintf("Lastest booting: (%ld) -> %s.\n",tnow,ctime(&tnow));
+    delay(500);
+  }
 
   //******  Check stateflag 
   display.print("SF"); //StateFlag
@@ -562,7 +565,7 @@ void loop(){
             waitFlag = 1;
             //cfgState = 5;
             Serial.printf("Program 1 :%d\n", coinValue);
-            timeRemain = stime[0]-1;
+            timeRemain = stime[0];
             waitTimeID=waitTime.after(60*1000*0.3,progStart);
             //waitTimeID=waitTime.after(60*1000*0.3,prog1start);
             
@@ -571,7 +574,7 @@ void loop(){
             waitFlag =2;
             //cfgState = 5;
             Serial.printf("Program 2 :%d\n", coinValue);
-            timeRemain = stime[1]-1;
+            timeRemain = stime[1];
             waitTimeID=waitTime.after(60*1000*0.3,progStart);
             //waitTimeID=waitTime.after(60*1000*0.3,prog2start);
             
@@ -585,7 +588,7 @@ void loop(){
             waitFlag= 3;
             //cfgState = 5;
             Serial.printf("Program 3 :%d\n", coinValue);
-            timeRemain = stime[2]-1;
+            timeRemain = stime[2];
             waitTimeID=waitTime.after(60*1000*0.3,progStart);
             //waitTimeID=waitTime.after(60*1000*0.3,prog3start);
             //prog3start();
@@ -600,27 +603,30 @@ void loop(){
           display.setBacklight(30);
           display.setColonOn(false);
 
+          display.scrollingText( ("t-"+String(timeRemain)).c_str(),1 );
+          display.animation1(display,500,10);
           // Serial.printf("dispflag: %d\n",dispflag);
           // Serial.printf("WaitFlag: %d\n",waitFlag);
 
+          /*
           if(!dispflag){
             switch(waitFlag){
               case 1://Prog1
-                display.print("P1");
+                //display.print("P1");
                 delay(300);
-                display.scrollingText("t-25",1);
+                display.scrollingText(("t-"+String(stime[0])).c_str(),1);
                 delay(300);
                 break;
               case 2://Prog2
-                display.print("P2");
+                //display.print("P2");
                 delay(300);
-                display.scrollingText("t-35",1);
+                display.scrollingText(("t-"+String(stime[1])).c_str(),1);
                 delay(300);
                 break;
               case 3://Prog3
-                display.print("P3");
+                //display.print("P3");
                 delay(300);
-                display.scrollingText("t-40",1);
+                display.scrollingText(("t-"+String(stime[2])).c_str(),1);
                 delay(300);
                 break;
             }
@@ -640,11 +646,11 @@ void loop(){
                 display.animation2(display,200,2);
                 break;
             }
+            display.scrollingText( ("t-"+String(timeRemain)).c_str(),1 );
+            display.animation1(display,500,10);
+            dispflag = false;
           }
-
-
-
-          //ani1.animation1(display,100,2);
+          */
           break;
       case 6:
           break;
@@ -1232,7 +1238,7 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     mqflipup.publish(fpPubTopic.c_str(),jsonmsg.c_str());
   #endif
 
-  delay(500);
+  //delay(500);
 }
 
 
@@ -1242,15 +1248,22 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
   }
 
 void fpBackendMqtt(){
+    int retryLimit = 3;
+    int retryCount = 1;
+
     if(!mqflipup.connected()){
       mqflipup.setServer(cfginfo.backend.mqtthost.c_str(),cfginfo.backend.mqttport);
       mqflipup.setCallback(fpCallback);
     
-      Serial.printf("Backend-2 Mqtt connecting ...");
-      while(!mqflipup.connect(cfginfo.deviceid.c_str(),cfginfo.backend.mqttuser.c_str(), cfginfo.backend.mqttpass.c_str())){
+      Serial.printf("Backend-2 Mqtt connecting ...\n");
+      while( (!mqflipup.connect(cfginfo.deviceid.c_str(),cfginfo.backend.mqttuser.c_str(), cfginfo.backend.mqttpass.c_str())) &&(retryCount <= retryLimit)){
         Serial.printf(".");
-        delay(500);
+        retryCount++;
+        //delay(500);
       }
+    }  
+
+    if(mqflipup.connected()){
       Serial.printf("connected\n");
       mqflipup.subscribe(fpSubTopic.c_str());
       Serial.printf("   Subscribe Topic: %s\n",fpSubTopic.c_str());
@@ -1260,6 +1273,8 @@ void fpBackendMqtt(){
 
 
 void pbBackendMqtt(){
+    int retryLimit = 3;
+    int retryCount = 1;
     //Serial.println("[pbBackendMqtt]");
           // Serial.println(cfginfo.payboard.uuid);
           // Serial.println(cfginfo.payboard.merchantid);
@@ -1271,15 +1286,18 @@ void pbBackendMqtt(){
     if(!mqclient.connected()){
       mqclient.setServer(cfginfo.payboard.mqtthost.c_str(),cfginfo.payboard.mqttport);
       mqclient.setCallback(pbCallback);
-
       
       //pbSubTopic = "payboard/" + String(cfginfo.payboard.merchantid) + "/" + String(cfginfo.payboard.uuid);
     
-      Serial.printf("Backend-1 Mqtt connecting ...");
-      while(!mqclient.connect(cfginfo.deviceid.c_str(),cfginfo.payboard.mqttuser.c_str(), cfginfo.payboard.mqttpass.c_str())){
+      Serial.printf("Backend-1 Mqtt connecting ...\n");
+      while( (!mqclient.connect(cfginfo.deviceid.c_str(),cfginfo.payboard.mqttuser.c_str(), cfginfo.payboard.mqttpass.c_str())) && (retryCount <= retryLimit) ){
         Serial.printf(".");
-        delay(500);
+        retryCount++;
+        //delay(500);
       }
+    }
+
+    if(mqclient.connected()){
       Serial.printf("connected\n");
       mqclient.subscribe(pbSubTopic.c_str());
       Serial.printf("   Subscribe Topic: %s\n",pbSubTopic.c_str());
@@ -1419,7 +1437,7 @@ void progStart(){
     cfgdata.end();
 
     Serial.printf(" Program Time: %d\n",timeRemain);
-    serviceTimeID=serviceTime.after((60*1000*timeRemain),serviceEnd);
+    serviceTimeID=serviceTime.after((60*1000*timeRemain-1),serviceEnd);
     timeLeftID = timeLeft.every(60*1000*1,serviceLeft);
     Serial.printf("On service of Program-1 for %d minutes\n",timeRemain);
   }else{

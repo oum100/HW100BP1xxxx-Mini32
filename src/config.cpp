@@ -193,31 +193,31 @@ void initCFG(Config &cfg){
     cfg.backend.mqttpass="password";
     cfg.backend.mqttport = 1883;    
 
-    if(cfg.asset.assettype == 0){//WASHER
+    // if(cfg.asset.assettype == 0){//WASHER
       cfg.product[0].sku = "P1";
       cfg.product[0].price = 30;
       cfg.product[0].stime = 25;
 
       cfg.product[1].sku = "P2";
       cfg.product[1].price = 40;
-      cfg.product[1].stime = 35;
+      cfg.product[1].stime = 30;
 
       cfg.product[2].sku = "P3";
       cfg.product[2].price = 50;
       cfg.product[2].stime = 40;   
-    }else{
-      cfg.product[0].sku = "P1";
-      cfg.product[0].price = 40;
-      cfg.product[0].stime = 60;
+    // }else{
+    //   cfg.product[0].sku = "P1";
+    //   cfg.product[0].price = 40;
+    //   cfg.product[0].stime = 60;
 
-      cfg.product[1].sku = "P2";
-      cfg.product[1].price = 50;
-      cfg.product[1].stime = 75;
+    //   cfg.product[1].sku = "P2";
+    //   cfg.product[1].price = 50;
+    //   cfg.product[1].stime = 75;
 
-      cfg.product[2].sku = "P3";
-      cfg.product[2].price = 60;
-      cfg.product[2].stime = 90;      
-    }
+    //   cfg.product[2].sku = "P3";
+    //   cfg.product[2].price = 60;
+    //   cfg.product[2].stime = 90;      
+    // }
     
 
     // for(int i=0;i<3;i++){
@@ -665,9 +665,12 @@ int loadWIFICFG(Preferences nvcfg,Config &cfg){
 
 void printLocalTime(){
   struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) {
-    Serial.println("Failed to obtain time");
-    return;
+  int retrylimit=3;
+  int retry=1;
+  while((!getLocalTime(&timeinfo)) && (retry <= retrylimit) ){
+    Serial.printf("Failed to obtain time. retry:%d\n",retry);
+    retry++;
+    delay(300);
   }
   Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
 }

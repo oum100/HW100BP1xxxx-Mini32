@@ -105,6 +105,4 @@ void getNVCFG(Preferences nvcfg, Config &cfg);
 int loadWIFICFG(Preferences nvcfg,Config &cfg);
 void printLocalTime();
 void WiFiinfo(void);
-
-
 #endif

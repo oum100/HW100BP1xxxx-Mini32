@@ -65,6 +65,8 @@ void Pboard::pbRegister(PubSubClient &client){
 String getdeviceid(void){
     char chipname[13];
     uint64_t chipid = ESP.getEfuseMac();
+    // Serial.print("Chipid: ");
+    // Serial.println(chipid,HEX);
 
     snprintf(chipname, 13, "%04X%08X", (uint16_t)(chipid >> 32),(uint32_t)chipid);
     

@@ -1,0 +1,7 @@
+{
+    "type": "HW100BP10829",
+    "version": "1.0.1",
+    "host": "www.flipup.net",
+    "port": 443,
+    "bin": "/firmware/HW100BP10829/HW100BP10829-1.0.1.bin"
+}
