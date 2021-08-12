@@ -91,15 +91,11 @@ gpio_config_t io_config;
 xQueueHandle gpio_evt_queue = NULL;
 
 
-
-
 void IRAM_ATTR gpio_isr_handler(void* arg)
 {
   long gpio_num = (long) arg;
   xQueueSendFromISR(gpio_evt_queue, &gpio_num, NULL);
 }
-
-
 
 
 void gpio_task(void *arg){
@@ -231,7 +227,7 @@ void setup(){
     wifimulti.run();
     //delay(2000);
   }
-    blinkGPIO(WIFI_LED,400);
+  blinkGPIO(WIFI_LED,400);
   Serial.printf("WiFi Connected...");
   WiFiinfo();
   
@@ -560,7 +556,7 @@ void loop(){
             display.scrollingText(dispPrice.c_str(),1);
           }
           break;
-      case 4: //*** After 1st coin insert
+      case 4: //*** After coinValue > 0
           if((coinValue == price[0]) && (waitFlag == 0)){\
             waitFlag = 1;
             //cfgState = 5;
@@ -1378,6 +1374,7 @@ void progStart(){
   
   digitalWrite(ENCOIN,LOW); // Disable Coin Module
 
+  //This select program base on coinValue
   switch(waitFlag){
     case 1:
       machineStart = startProg(1);
@@ -1433,6 +1430,10 @@ void progStart(){
           Serial.printf("Rescode: %d\n",rescode);
         }
         break;
+      case 3: // by Kiosk
+        break;
+      case 4: // by Free  no record to backend
+        break;
     }
     cfgdata.end();
 
@@ -1487,6 +1488,7 @@ void serviceEnd(){
 
     switch(paymentby){
       case 1: // by  Coin
+        Serial.printf("Coin Job Finished.\n");
         break;
       case 2: // by QR
         Serial.printf("Sending QR acknoloedge to backend\n");
@@ -1503,8 +1505,10 @@ void serviceEnd(){
         }
         break;
       case 3: // by Kiosk
+        Serial.printf("Kiosk Job finished.\n");
         break;
-      case 4: // by Admin
+      case 4: // Free job by Admin
+        Serial.printf("Free Job finish.ed\n");
         break;
     }
 
