@@ -339,7 +339,7 @@ bool secureEsp32FOTA::prepareConnection(String destinationServer)
     //mark comment by Teerin (27Feb21 tesing connect https)
     //clientForOta.setCACert(certificate);
     clientForOta.setCACert(certificate);
-    clientForOta.setInsecure();
+    clientForOta.setInsecure(); // Add by Teerin: comment if using https secure
     if (clientForOta.connect(destinationServer.c_str(), 443))
     {
         return true;
@@ -413,7 +413,7 @@ bool secureEsp32FOTA::execHTTPSCheck()
     char JSONMessage[str_len];
     unparsedDescriptionOfFirmware.toCharArray(JSONMessage, str_len);
 
-    StaticJsonDocument<300> JSONDocument; //Memory pool
+    StaticJsonDocument<512> JSONDocument; //Memory pool
     DeserializationError err = deserializeJson(JSONDocument, JSONMessage);
 
     if (err)
@@ -424,7 +424,6 @@ bool secureEsp32FOTA::execHTTPSCheck()
     }
 
     description->type = JSONDocument["type"].as<String>();
-
     description->host = JSONDocument["host"].as<String>();
     description->version = JSONDocument["version"].as<String>();  // description->version = JSONDocument["version"].as<int>();
     description->bin = JSONDocument["bin"].as<String>();

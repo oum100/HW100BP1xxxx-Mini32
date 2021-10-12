@@ -11,6 +11,7 @@
 //Wifi Library
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
+#include <WebSerial.h>
 #include <AsyncTCP.h>
 //#include <WebServer.h>
 //#include <DNSServer.h>
@@ -53,6 +54,7 @@
 #include <time.h>
 
 #include <nvs_flash.h>
+
 
 
 

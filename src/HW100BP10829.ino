@@ -40,6 +40,10 @@ int stateflag = 0;
 
 int dispCount =0;
 
+String disperr="";
+String disptxt="";
+bool disponce = 0;
+
 //int bill=0;
 
 Timer serviceTime, waitTime, timeLeft, blinkWiFi;
@@ -85,7 +89,19 @@ String timeStamp;
 int timeRemain=0;
 
 
-secureEsp32FOTA esp32OTA("HW100BP10829", "");
+//secureEsp32FOTA esp32OTA("HW100BP10829", "1.0.0");
+
+AsyncWebServer server(80);
+
+//********************************* Webserial Callback function **********************************
+void recvMsg(uint8_t *data, size_t len){
+  WebSerial.println("Received Data...");
+  String msg = "";
+  for(int i=0; i < len; i++){
+    msg += char(data[i]);
+  }
+  WebSerial.println(msg);
+}
 
 gpio_config_t io_config;
 xQueueHandle gpio_evt_queue = NULL;
@@ -213,6 +229,7 @@ void setup(){
   Serial.printf("WiFi Connecting.....\n");
 
   WiFi.mode(WIFI_AP_STA);
+  
   wifimulti.addAP("OYO Happylandn guest","12345678");
   //wifimulti.addAP("Home173-AIS","1100110011");
   wifimulti.addAP("myWiFi","1100110011");
@@ -229,6 +246,8 @@ void setup(){
   }
   blinkGPIO(WIFI_LED,400);
   Serial.printf("WiFi Connected...");
+  WebSerial.begin(&server);
+  WebSerial.msgCallback(recvMsg);
   WiFiinfo();
   
   display.print("LC"); //Load Config
@@ -364,7 +383,8 @@ void setup(){
       doc["response"]="reboot";
       doc["merchantid"]=cfginfo.payboard.merchantid;
       doc["uuid"]=cfginfo.payboard.uuid;
-      doc["state"]="Rebooted";
+      doc["state"]="reboot_done";
+      doc["desc"]="Reboot after action:Reboot complete";
       serializeJson(doc,jsonmsg);  
 
       if(!mqclient.connected()){
@@ -390,7 +410,8 @@ void setup(){
       doc["response"]="ota";
       doc["merchantid"]=cfginfo.payboard.merchantid;
       doc["uuid"]=cfginfo.payboard.uuid;
-      doc["state"]="Updated";
+      doc["state"]="ota_done";
+      doc["desc"]="Reboot after action:OTA complete";
       doc["firmware"]=cfginfo.asset.firmware;
       serializeJson(doc,jsonmsg);  
 
@@ -413,6 +434,34 @@ void setup(){
       stateflag = 0;
       Serial.printf("After OTA stateflag: %d\n",stateflag);
       cfgState=3;
+    }else if(stateflag == 3){ //After nvsdelete
+      display.scrollingText("n-dEL",2);
+      doc["response"]="nvsdelete";
+      doc["merchantid"]=cfginfo.payboard.merchantid;
+      doc["uuid"]=cfginfo.payboard.uuid;
+      doc["state"]="nvs_done";
+      doc["desc"]="Reboot after action:nvs_delete complete";
+      doc["firmware"]=cfginfo.asset.firmware;
+      serializeJson(doc,jsonmsg);  
+
+      if(!mqclient.connected()){
+        pbBackendMqtt();
+      }else{
+        mqclient.publish(pbPubTopic.c_str(),jsonmsg.c_str());
+      }
+
+      #ifdef FLIPUPMQTT
+        if(!mqflipup.connected()){
+          fpBackendMqtt();
+        }else{
+          mqflipup.publish(fpPubTopic.c_str(),jsonmsg.c_str());
+        }
+      #endif
+
+      cfgdata.putInt("stateflag",0);
+      stateflag = 0;
+      Serial.printf("stateflag after: %d\n",stateflag);
+      cfgState=3;      
     }else if(stateflag == 5){ // Last Service not finish but may be power off.
       Serial.printf("Before resume stateflag: %d\n",stateflag);
       display.print("PF"); //Power Outage Event
@@ -598,57 +647,31 @@ void loop(){
           //Serial.printf("Service running please wait\n");
           display.setBacklight(30);
           display.setColonOn(false);
-
-          display.scrollingText( ("t-"+String(timeRemain)).c_str(),1 );
-          display.animation1(display,500,10);
-          // Serial.printf("dispflag: %d\n",dispflag);
-          // Serial.printf("WaitFlag: %d\n",waitFlag);
-
-          /*
-          if(!dispflag){
-            switch(waitFlag){
-              case 1://Prog1
-                //display.print("P1");
-                delay(300);
-                display.scrollingText(("t-"+String(stime[0])).c_str(),1);
-                delay(300);
-                break;
-              case 2://Prog2
-                //display.print("P2");
-                delay(300);
-                display.scrollingText(("t-"+String(stime[1])).c_str(),1);
-                delay(300);
-                break;
-              case 3://Prog3
-                //display.print("P3");
-                delay(300);
-                display.scrollingText(("t-"+String(stime[2])).c_str(),1);
-                delay(300);
-                break;
-            }
-            dispflag = true;
-          }else{
-            switch(waitFlag){
-              case 1://Prog1
-                display.animation4(display,200,2);
-                break;
-              case 2://Prog2
-                display.animation1(display,200,2);
-                break;
-              case 3://Prog3
-                display.animation3(display,200,2);
-                break;
-              default:
-                display.animation2(display,200,2);
-                break;
-            }
-            display.scrollingText( ("t-"+String(timeRemain)).c_str(),1 );
-            display.animation1(display,500,10);
-            dispflag = false;
+          disptxt = "";
+          if(!disperr.isEmpty()){
+            disptxt = disperr +"-";
           }
-          */
+
+          if(timeRemain <10){
+            disptxt = disptxt+ "0"+String(timeRemain);
+          }else{
+            disptxt = disptxt+ String(timeRemain);
+          }
+          display.scrollingText(disptxt.c_str(),1);
+          delay(1000);
+          display.animation1(display,500,10);
+
+          
           break;
       case 6:
+          break;
+      case 10:
+          display.scrollingText("--OFF--",1);
+          if(!disponce){
+            Serial.println("Asset is in OFFLINE mode");
+            WebSerial.println("Asset is in OFFLINE mode");
+            disponce = 1;
+          }
           break;
     }
   }else{
@@ -922,8 +945,12 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
       case 5: // Available (waiting for job)
           doc["state"] = "Busy"; // On Service
           break;
+      case 10:
+          doc["state"] = "Offline";
+          break;
     }
     //doc["state"]=cfgState;
+    doc["firmware"]=cfginfo.asset.firmware;
     doc["timeRemain"] = timeRemain;
 
   }else if( (action == "reset") || (action=="reboot") || (action=="restart")){
@@ -960,7 +987,9 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     ESP.restart();
 
   }else if(action == "ota"){
+    secureEsp32FOTA esp32OTA("HW100BP10829", cfginfo.asset.firmware.c_str());
     WiFiClientSecure clientForOta;
+    digitalWrite(ENCOIN,LOW); // ENCoin off
 
     esp32OTA._host="www.flipup.net"; //e.g. example.com
     esp32OTA._descriptionOfFirmwareURL="/firmware/HW100BP10829/firmware.json"; //e.g. /my-fw-versions/firmware.json
@@ -1167,12 +1196,16 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
   }else if(action == "stateflag"){ //stateflag is flag for mark action before reboot  ex 1 is for reboot action, 2 for ota action
 
   }else if(action == "jobcancel"){
-    //stateflag = 0;
-    //orderid ="";
-    //cfgStatte = 3;
-    //waitFlag =0;
-    //dispflag = 0;
+    serviceEnd();
+    doc.clear();
+    doc["response"] = "jobcancel";
+    doc["merchantid"]=cfginfo.payboard.merchantid;
+    doc["uuid"]=cfginfo.payboard.uuid;
+    doc["state"]="canceeled";
+    doc["desc"]="Manual cancel job.";
 
+    display.scrollingText("J-dEL",1);
+    delay(5000);
   }else if(action == "jobcreate"){
     coinValue = doc["price"].as<int>();
     paymentby = doc["paymentby"].as<int>();  //1 = coin , 2 = qr, 3 = kiosk , 4 = free
@@ -1187,6 +1220,8 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     doc["state"]="created";
     doc["desc"]="Manual create job.";
 
+    display.scrollingText("J-Add",1);
+    delay(5000);
   }else if(action == "nvsdelete"){
     String msg;
 
@@ -1200,8 +1235,17 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     doc["response"] = "nvsdelete";
     doc["merchantid"]=cfginfo.payboard.merchantid;
     doc["uuid"]=cfginfo.payboard.uuid;
-    doc["state"]="deleted";
+    doc["state"]="NVS_Deleted";
     doc["desc"]=msg;    
+
+    display.scrollingText("n-dEL",1);
+
+    cfgdata.begin("config",false);
+    cfgdata.putInt("stateflag",3);
+    cfgdata.end();
+    delay(3000);
+
+    ESP.restart();
   }else if(action == "selftest"){
     String msg;
 
@@ -1214,7 +1258,35 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     doc["uuid"]=cfginfo.payboard.uuid;
     doc["state"]="deleted";
     doc["desc"]=msg;    
+  }else if(action == "offline"){
+  
+    digitalWrite(ENCOIN,LOW); // ENCoin off
+    cfgState = 10;// CFGState 10 offline
+    timeRemain = 0;
+    disponce = 0;
+    cfgdata.begin("config",false);
+    cfgdata.putInt("stateflag",cfgState);
+    cfgdata.putInt("timeremain",timeRemain);
+    cfgdata.end();   
+
+    doc.clear();
+    doc["response"] = "offline";
+    doc["merchantid"]=cfginfo.payboard.merchantid;
+    doc["uuid"]=cfginfo.payboard.uuid;
+    doc["state"]="offline";
+    doc["desc"]="Asset is in OFFLINE mode";    
+
+  }else if(action == "online"){
+    resetState();
+
+    doc.clear();
+    doc["response"] = "online";
+    doc["merchantid"]=cfginfo.payboard.merchantid;
+    doc["uuid"]=cfginfo.payboard.uuid;
+    doc["state"]="online";
+    doc["desc"]="Asset is in ONLINE mode";       
   }
+
 
   serializeJson(doc,jsonmsg);
   Serial.println();
@@ -1519,5 +1591,34 @@ void serviceEnd(){
     serviceTimeID=serviceTime.after((60*1000*1),serviceEnd);
     timeLeftID = timeLeft.every(60*1000*1,serviceLeft);
   }
+
+}
+
+
+
+void resetState()
+{
+  timeRemain = 0;
+  coinValue = 0;
+  paymentby = 0;
+
+  cfgState = 3;
+  waitFlag = 0;
+  dispflag = 0;
+
+  // pauseflag = false;
+
+  // firstExtPaid = 0;
+  // extpaid = 0;
+  // extraPay = 0;
+  disperr="";
+  disptxt="";
+  disponce = 0;
+
+  cfgdata.begin("config",false);
+  cfgdata.putInt("stateflag",0);
+  cfgdata.putString("orderid","");
+  cfgdata.putInt("timeremain",0);
+  cfgdata.end();
 
 }

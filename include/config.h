@@ -2,8 +2,6 @@
 #define config_h
 
 #include <Arduino.h>
-#include "FS.h"
-#include <LITTLEFS.h>
 #include <Preferences.h>
 
 
@@ -81,10 +79,6 @@ void readAssetCFG(Config &cfg,String &jsoncfg);
 void readBackendCFG(Config &cfg,String &jsoncfg);
 void readPayboardCFG(Config &cfg,String &jsoncfg);
 
-bool saveCFG(Config &cfg,fs::FS &fs);
-
-
-
 
 String  payboardJSON(Config &cfg);
 void payboardJSON2(Config &cfg,String &jsconfig);
@@ -107,6 +101,9 @@ void getNVCFG(Preferences nvcfg, Config &cfg);
 int loadWIFICFG(Preferences nvcfg,Config &cfg);
 void printLocalTime();
 void WiFiinfo(void);
+
+String getdeviceid(void);
+
 #endif
 
 /*

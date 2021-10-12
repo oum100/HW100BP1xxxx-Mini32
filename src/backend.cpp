@@ -62,16 +62,16 @@ void Pboard::pbRegister(PubSubClient &client){
 }
 
 
-String getdeviceid(void){
-    char chipname[13];
-    uint64_t chipid = ESP.getEfuseMac();
-    // Serial.print("Chipid: ");
-    // Serial.println(chipid,HEX);
+// String getdeviceid(void){
+//     char chipname[13];
+//     uint64_t chipid = ESP.getEfuseMac();
+//     // Serial.print("Chipid: ");
+//     // Serial.println(chipid,HEX);
 
-    snprintf(chipname, 13, "%04X%08X", (uint16_t)(chipid >> 32),(uint32_t)chipid);
+//     snprintf(chipname, 13, "%04X%08X", (uint16_t)(chipid >> 32),(uint32_t)chipid);
     
-    return chipname;
-}
+//     return chipname;
+// }
 
 /* ----------------Control Machine SW ----------------- */
 //PowerSW:25, ProgSW:26, StartSW:27
@@ -183,7 +183,6 @@ String CoinTracker::devRegis(DEVinfo devinfo){
 
     String jsonstr;
     serializeJson(doc,jsonstr);
-
 
     requestPOST(apihost,jsonstr,response);
 }

@@ -29,6 +29,6 @@ void deleteFile2(fs::FS &fs, const char * path);
 // void initialCFG(Config &cfg);
 // void payboardCFG(Config &cfg);
 
-String getdeviceid(void);
+//String getdeviceid(void);
 
 #endif

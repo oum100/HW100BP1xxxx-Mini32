@@ -55,7 +55,8 @@ class Pboard {
         
 };
 
-String getdeviceid(void);
+// String getdeviceid(void);
+
 int requestPOST(String server, String req, String &res);
 int requestGET(String server, String &res);
 void pulseGEN2(int object,bool logic, uint qty, int width);

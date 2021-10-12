@@ -2,9 +2,8 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <WiFi.h>
-#include <LITTLEFS.h>
 #include "config.h"
-#include "myFs.h"
+
 
 
 String SoftAP_NAME PROGMEM = "BT_" + getdeviceid();
@@ -12,6 +11,56 @@ IPAddress SoftAP_IP(192,168,8,20);
 IPAddress SoftAP_GW(192,168,8,1);
 IPAddress SoftAP_SUBNET(255,255,255,0);
 //to set firmware version find  cfg.asset.firmware  (row 30)
+
+void initGPIO(unsigned long long INP, unsigned long long OUTP){
+  gpio_config_t io_config;
+
+  Serial.printf("  Execute---Initial GPIO Functio\n");
+  //*** Initial INTERRUPT PIN
+//   io_config.intr_type = GPIO_INTR_NEGEDGE;
+//   io_config.pin_bit_mask = INTR;
+//   io_config.mode = GPIO_MODE_INPUT;
+//   io_config.pull_up_en = GPIO_PULLUP_ENABLE;
+//   gpio_config(&io_config);
+  
+  //*** Initial INPUT PIN
+  io_config.pin_bit_mask = INP;
+  io_config.intr_type = GPIO_INTR_DISABLE;
+  io_config.mode = GPIO_MODE_INPUT;
+  io_config.pull_up_en = GPIO_PULLUP_ENABLE;
+  gpio_config(&io_config);
+
+
+  //*** Initial INPUT & OUTPUT PIN
+  io_config.pin_bit_mask = OUTP;
+  io_config.intr_type = GPIO_INTR_DISABLE;
+  io_config.mode = GPIO_MODE_INPUT_OUTPUT;
+  gpio_config(&io_config);
+}
+
+void initOUTPUT(int inx,byte *pin){
+    for(int i=0;i<inx;i++){
+        pinMode(pin[i],OUTPUT);
+        digitalWrite(pin[i],LOW);
+    }
+}
+
+void initINPUT(int inx, byte *pin){
+    for(int i=0;i<inx;i++){
+        pinMode(pin[i],INPUT_PULLUP);
+    }
+}
+
+void blinkGPIO(int pin, int btime){
+    if(digitalRead(pin)){         
+        digitalWrite(pin,LOW);
+        delay(btime);
+    }else{
+        digitalWrite(pin,HIGH);
+        delay(btime);
+    }
+}
+
 
 void getnvPbCFG(Preferences nvcfg, Config &cfg){
   Serial.printf("  Getting Payboard Configuration from NV\n");
@@ -157,32 +206,6 @@ void getNVCFG(Preferences nvcfg, Config &cfg){
     nvcfg.end();
 }
 
-void initGPIO(unsigned long long INP, unsigned long long OUTP){
-  gpio_config_t io_config;
-
-  Serial.printf("  Execute---Initial GPIO Functio\n");
-  //*** Initial INTERRUPT PIN
-//   io_config.intr_type = GPIO_INTR_NEGEDGE;
-//   io_config.pin_bit_mask = INTR;
-//   io_config.mode = GPIO_MODE_INPUT;
-//   io_config.pull_up_en = GPIO_PULLUP_ENABLE;
-//   gpio_config(&io_config);
-  
-  //*** Initial INPUT PIN
-  io_config.pin_bit_mask = INP;
-  io_config.intr_type = GPIO_INTR_DISABLE;
-  io_config.mode = GPIO_MODE_INPUT;
-  io_config.pull_up_en = GPIO_PULLUP_ENABLE;
-  gpio_config(&io_config);
-
-
-  //*** Initial INPUT & OUTPUT PIN
-  io_config.pin_bit_mask = OUTP;
-  io_config.intr_type = GPIO_INTR_DISABLE;
-  io_config.mode = GPIO_MODE_INPUT_OUTPUT;
-  gpio_config(&io_config);
-}
-
 
 
 void initCFG(Config &cfg){
@@ -211,7 +234,7 @@ void initCFG(Config &cfg){
     cfg.asset.pass="ad1@#min";
     cfg.asset.mac = "";
     cfg.asset.model ="HW100BP10829_V2.0.0";
-    cfg.asset.firmware = "1.0.0";
+    cfg.asset.firmware = "1.0.1";
 
     cfg.backend.apihost="https://cointracker100.herokuapp.com/cointracker/v1.0.0/devices";
     cfg.backend.apikey="87cdf9229caf9a7fa3fd1403bcc5dd97";
@@ -606,49 +629,6 @@ void showCFG(Config &cfg){
 }
 
 
-bool saveCFG(Config &cfg,fs::FS &fs){
-    if(initFS(LITTLEFS)){
-      String cfginfoJSON PROGMEM;
-
-      cfginfoJSON = cfgJSON(cfg);
-      Serial.print("configJSON: ");
-      Serial.println(cfginfoJSON);
-      writeFile2(LITTLEFS,"/config.json",cfginfoJSON.c_str());
-      LITTLEFS.end();
-      Serial.println("  configCFG save completed.");      
-      return true;
-    }else{
-      Serial.println("   File System failed");
-      return false;
-    }
-}
-
-
-
-void initOUTPUT(int inx,byte *pin){
-    for(int i=0;i<inx;i++){
-        pinMode(pin[i],OUTPUT);
-        digitalWrite(pin[i],LOW);
-    }
-}
-
-void initINPUT(int inx, byte *pin){
-    for(int i=0;i<inx;i++){
-        pinMode(pin[i],INPUT_PULLUP);
-    }
-}
-
-
-void blinkGPIO(int pin, int btime){
-    if(digitalRead(pin)){         
-        digitalWrite(pin,LOW);
-        delay(btime);
-    }else{
-        digitalWrite(pin,HIGH);
-        delay(btime);
-    }
-}
-
 
 void WiFiinfo(void){
       Serial.printf("\nWiFi Connect to\n");
@@ -700,4 +680,15 @@ void printLocalTime(){
     delay(300);
   }
   Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
+}
+
+String getdeviceid(void){
+    char chipname[13];
+    uint64_t chipid = ESP.getEfuseMac();
+    // Serial.print("Chipid: ");
+    // Serial.println(chipid,HEX);
+
+    snprintf(chipname, 13, "%04X%08X", (uint16_t)(chipid >> 32),(uint32_t)chipid);
+    
+    return chipname;
 }
