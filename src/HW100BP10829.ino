@@ -928,7 +928,7 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     */
   }else if(action == "ping"){
 
-    Serial.printf("response action PING\n");
+    Serial.printf("response action PING\n"); 
 
     doc.clear();
     doc["response"]="ping";
