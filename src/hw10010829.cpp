@@ -195,6 +195,8 @@ bool startProg(int prognum){
   }  
 
   if(i <= 14){
+    /*  This for K.Thawee shop 3 program  use case 1 ,2, 3*/
+    /*  Regent use case 11, 12, 13 */
     switch(prognum){
       case 1:
           //  At Quick mode 20 degree, 2rinse, 23mins
@@ -211,8 +213,21 @@ bool startProg(int prognum){
           buttonCtrl(RINSE,2,200);   //Set temp to 0degree;
           buttonCtrl(TEMP,4,200);   //Set temp to 30degree;
           break;     
+      case 11:   // Quick wash 15 min, 2 rinse, 20degre
+          for(int i = 1;i<=11;i++){
+            buttonCtrl(UP,1,300);
+          }
+          buttonCtrl(RINSE,2,200);   //Set temp to 0degree;
+          buttonCtrl(TEMP,3,200);   //Set temp to 30degree;
+          break;
+      case 12:
+          //buttonCtrl(TEMP,2,200);   //Set temp to 30degree;
+          break;
+      case 13:
+          break;
     }
-    delay(2000);
+
+    delay(2000);// Set Delay wait for customer insert detergent.
     buttonCtrl(START,1,200);
     return true;
   }else{

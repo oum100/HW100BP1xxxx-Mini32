@@ -1,17 +1,52 @@
-#include "config.h"
-#include "myFS.h"
-#include "DataEEprom.h"
+// ******** v1.0.5 ********
+// #define FixedMAC "8C:AA:B5:00:00:01"   // Mac addreess for test only
+// Production MAC Address Haier HW100BP10829
+
+// RGH-18:  List of device that required Fixed MAC
+// #define FixedMAC "8C:AA:B5:85:AB:BC"   //  Mac for INS-004  
+#define FixedMAC "8C:AA:B5:85:A0:AC"   // Mac for WH-010  
+
+// SkyView: List of device that required Fixed MAC
+// #define FixedMAC "3C:E9:0E:54:C2:70"  // WM-010 Skyview shop
+// #define FixedMAC "3C:E9:0E:54:C3:38"     // SkyView:  WM-012
+
+// Production MAC Address Haier HW100BP14826
+// #define FixedMAC ""   // Mac for 
+ 
+
+
+// #define HW100BP10829
+#define HW100BP14826
+
+#ifdef HW100BP10829
 #include "hw10010829.h"
+#endif
+
+#ifdef HW100BP14826
+#include "HW100BP14826.h"
+#endif
+
+/*------------------------  Display Device ----------------------- */
+// #define LCD1602
+#define TM1637
+// #define HT16K33
+
+
+#include "config.h"
+//#include "myFS.h"
+//#include "DataEEprom.h"
+
+
 #include "payboardAPI.h"
 //#include "interrupt.h"
-#include <LITTLEFS.h>
+///#include <LITTLEFS.h>
 #include <Preferences.h>
 #include "animation.h"
 
 //Wifi Library
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
-#include <WebSerial.h>
+//#include <WebSerial.h>
 #include <AsyncTCP.h>
 //#include <WebServer.h>
 //#include <DNSServer.h>

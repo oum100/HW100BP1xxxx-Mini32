@@ -13,9 +13,16 @@ class digitdisplay : public SevenSegmentFun{
         // digitdisplay(void);
         digitdisplay(uint8_t pinClk, uint8_t pinDIO);
         void animation1(SevenSegmentTM1637 &disp,int dtime,int repeat);
+        void animation1(SevenSegmentTM1637 &disp,int dtime,int repeat,int col);  
+
         void animation2(SevenSegmentTM1637 &disp,int dtime,int repeat);
+     
+
         void animation3(SevenSegmentTM1637 &disp,int dtime,int repeat);
+     
+
         void animation4(SevenSegmentTM1637 &disp,int dtime,int repeat);
+
 };
 
 

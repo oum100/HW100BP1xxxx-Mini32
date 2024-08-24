@@ -85,9 +85,13 @@ void getnvAssetCFG(Preferences nvcfg, Config &cfg){
     cfg.asset.orderid = nvcfg.getString("orderid");
     cfg.asset.firmware = nvcfg.getString("firmware");
     cfg.asset.coinModule = nvcfg.getInt("coinModule");
+    cfg.asset.coinwaittimeout = nvcfg.getFloat("coinwaittimeout");
+    cfg.asset.updateAvailable = nvcfg.getInt("updateAvailable");
+    cfg.asset.updateBusy = nvcfg.getInt("updateBusy");
     cfg.asset.assettype = nvcfg.getInt("assettype");
     cfg.asset.user=nvcfg.getString("user");
     cfg.asset.pass=nvcfg.getString("pass");
+    cfg.asset.mac=nvcfg.getString("fixedmac");  // Added 2 Feb 66
   Serial.printf("  Completed get Asset Configuration\n");
   nvcfg.end();
 }
@@ -105,28 +109,34 @@ void getnvBackend(Preferences nvcfg, Config &cfg){
   nvcfg.end();
 }
 
-void getnvProduct(Preferences nvcfg, Config &cfg){
-  Serial.printf("  Getting Product Configuration from NV\n");
+int getnvProduct(Preferences nvcfg, Config &cfg){
+  int prodcount = 0;
+  Serial.println();
+  Serial.printf("Loading Product Infomation ........\n");
   nvcfg.begin("config",false);
     if(nvcfg.isKey("sku1")){
         cfg.product[0].sku = nvcfg.getString("sku1");
         cfg.product[0].price = nvcfg.getFloat("price1");
         cfg.product[0].stime = nvcfg.getInt("stime1");
+        prodcount++;
     }
 
     if(nvcfg.isKey("sku2")){
         cfg.product[1].sku = nvcfg.getString("sku2");
         cfg.product[1].price = nvcfg.getFloat("price2");
         cfg.product[1].stime = nvcfg.getInt("stime2");
+        prodcount++;
     }
 
     if(nvcfg.isKey("sku3")){
         cfg.product[2].sku = nvcfg.getString("sku3");
         cfg.product[2].price = nvcfg.getFloat("price3");
         cfg.product[2].stime = nvcfg.getInt("stime3");
+        prodcount++;
     }
   Serial.printf("  Completed get Product Configuration\n");
   nvcfg.end();  
+  return prodcount;
 }
 
 
@@ -153,9 +163,29 @@ void getNVCFG(Preferences nvcfg, Config &cfg){
             cfg.asset.coinModule = nvcfg.getInt("coinModule");
         }
 
+        if(nvcfg.isKey("coinwaittimeout")){
+            cfg.asset.coinwaittimeout = nvcfg.getFloat("coinwaittimeout");
+        }        
+
+        if(nvcfg.isKey("updateAvailable")){
+            cfg.asset.updateAvailable = nvcfg.getInt("updateAvailable");
+        }
+
+        if(nvcfg.isKey("updateBusy")){
+            cfg.asset.updateBusy = nvcfg.getInt("updateBusy");
+        }
+
         if(nvcfg.isKey("assettype")){
             cfg.asset.assettype = nvcfg.getInt("assettype");
         }
+
+        if(nvcfg.isKey("ntpserver1")){ // Added  1 Nov 65  v1.0.4
+            cfg.asset.ntpServer1 = nvcfg.getString("ntpserver1");
+        }        
+
+        if(nvcfg.isKey("ntpserver2")){ // Added  1 Nov 65  v1.0.4
+            cfg.asset.ntpServer2 = nvcfg.getString("ntpserver2");
+        }   
 
         if(nvcfg.isKey("merchantid")){
             cfg.payboard.merchantid = nvcfg.getString("merchantid");
@@ -213,8 +243,8 @@ void initCFG(Config &cfg){
     cfg.header = "EITC";
     cfg.deviceid = "";
 
-    cfg.payboard.merchantid = "1000000104";
-    cfg.payboard.merchantkey = "mki9lvhjpp1xt4jxgjdjqxuhx2ihucgkgz9ledsylsu7terwtsnibhhjzrnsiiig";
+    cfg.payboard.merchantid = "10000105"; // K.Tawee:1000000104  RGH18:10000105
+    cfg.payboard.merchantkey = "np2nvpjcp5pgr7a0f0ho8l5n7oqwkmpu2gxfrgdzyjdaui2frtbolidvc7ytru4y";
     cfg.payboard.apihost = "https://apis-dv-partner.payboard.cc";
     cfg.payboard.apikey = "558iim6kjkre38dxk2uj8i6yuew6gwa9";
     cfg.payboard.mqtthost ="mq3.payboard.cc";
@@ -226,15 +256,39 @@ void initCFG(Config &cfg){
 
 
     cfg.asset.assetid="";
-    cfg.asset.merchantid="07202100001";
+    cfg.asset.merchantid="07202100002";
     cfg.asset.orderid="";
-    cfg.asset.assettype=DRYER; // 0 = WASHER, 1 = DRYER
-    cfg.asset.coinModule=SINGLE; //  SINGLE=0, MULTI=1
+    cfg.asset.assettype=WASHER; // 0 = WASHER, 1 = DRYER
+    cfg.asset.coinModule=MULTI; //  SINGLE=0, MULTI=1
+    cfg.asset.coinwaittimeout = 0.12;
+    cfg.asset.updateAvailable = 60;
+    cfg.asset.updateBusy = 1;    
     cfg.asset.user="admin";
     cfg.asset.pass="ad1@#min";
     cfg.asset.mac = "";
+    #ifdef HW100BP10829
     cfg.asset.model ="HW100BP10829_V2.0.0";
-    cfg.asset.firmware = "1.0.1";
+    #endif
+    #ifdef HW100BP14826
+    cfg.asset.model ="HW100BP10829_V1.4.2";
+    #endif
+    cfg.asset.firmware = "1.0.7";
+    cfg.asset.ntpServer1="1.th.pool.ntp.org";
+    cfg.asset.ntpServer2="asia.pool.ntp.org";
+
+
+    /*
+      v1.0.7  1 Feb 2567
+
+
+
+    */
+
+
+      /*
+        v1.0.3----  28 Jan 2022 : Modify Serviceend() tu use DLOCK sensor
+                ----  28 Jan 2022 : hw10010829.h  1st line add #define TAWEE
+     */
 
     cfg.backend.apihost="https://cointracker100.herokuapp.com/cointracker/v1.0.0/devices";
     cfg.backend.apikey="87cdf9229caf9a7fa3fd1403bcc5dd97";
@@ -243,38 +297,47 @@ void initCFG(Config &cfg){
     cfg.backend.mqttpass="password";
     cfg.backend.mqttport = 1883;    
 
-    // if(cfg.asset.assettype == 0){//WASHER
-      cfg.product[0].sku = "P1";
-      cfg.product[0].price = 30;
-      cfg.product[0].stime = 25;
-
-      cfg.product[1].sku = "P2";
-      cfg.product[1].price = 40;
-      cfg.product[1].stime = 30;
-
-      cfg.product[2].sku = "P3";
-      cfg.product[2].price = 50;
-      cfg.product[2].stime = 40;   
-    // }else{
+    // Happy Land shop
     //   cfg.product[0].sku = "P1";
-    //   cfg.product[0].price = 40;
-    //   cfg.product[0].stime = 60;
+    //   cfg.product[0].price = 30;
+    //   cfg.product[0].stime = 25;
 
     //   cfg.product[1].sku = "P2";
-    //   cfg.product[1].price = 50;
-    //   cfg.product[1].stime = 75;
+    //   cfg.product[1].price = 40;
+    //   cfg.product[1].stime = 30;
 
     //   cfg.product[2].sku = "P3";
-    //   cfg.product[2].price = 60;
-    //   cfg.product[2].stime = 90;      
-    // }
-    
+    //   cfg.product[2].price = 50;
+    //   cfg.product[2].stime = 40;   
 
-    // for(int i=0;i<3;i++){
-    //     cfg.product[i].sku="";
-    //     cfg.product[i].price=0;
-    //     cfg.product[i].stime=0;
-    // }
+    // Regent Shop
+    //   cfg.product[0].sku = "P1";   // Prog Quick 15M, Rinse 2, Temp 30
+    //   cfg.product[0].price = 20;    //RGH18 is 20, Other is 30
+    //   cfg.product[0].stime = 35;
+
+    //   cfg.product[1].sku = "P2"; // Prog Cotton 1h , Rinse 2, Temp 30
+    //   cfg.product[1].price = 30;    //RGH18 is 30, Other is 40
+    //   cfg.product[1].stime = 60;
+
+    //   cfg.product[2].sku = "P3"; //Prog Cotton 1h, Rinse 2, Temp 60
+    //   cfg.product[2].price = 40;    //RGH18 is 40, Other is 50
+    //   cfg.product[2].stime = 90;      
+    
+    // Skyview Shop
+    cfg.product[0].sku = "P1";   // Prog Quick 15M, Rinse 2, Temp 30
+    cfg.product[0].price = 30;    //RGH18 is 20, Other is 30
+    cfg.product[0].stime = 35;
+
+    cfg.product[1].sku = "P2"; // Prog Cotton 1h , Rinse 2, Temp 30
+    cfg.product[1].price = 40;    //RGH18 is 30, Other is 40
+    cfg.product[1].stime = 60;
+
+    cfg.product[2].sku = "P3"; //Prog Cotton 1h, Rinse 2, Temp 60
+    cfg.product[2].price = 50;    //RGH18 is 40, Other is 50
+    cfg.product[2].stime = 90;      
+
+
+
 }
 
 
@@ -583,6 +646,9 @@ void showCFG(Config &cfg){
     Serial.printf("  MerchantID: %s\n",cfg.asset.merchantid.c_str());
     Serial.printf("  Orderid: %s\n",cfg.asset.orderid.c_str());
     Serial.printf("  CoinType: %d\n",cfg.asset.coinModule);
+    Serial.printf("  CoinWaitTimeout: %.2f\n",cfg.asset.coinwaittimeout);
+    Serial.printf("  updateAvailable: %d\n",cfg.asset.updateAvailable);
+    Serial.printf("  updateBusy: %d\n",cfg.asset.updateBusy);    
     Serial.printf("  AssetType: %d\n",cfg.asset.assettype);
     Serial.printf("  Firmware: %s\n",cfg.asset.firmware.c_str());
     Serial.printf("  MacAddress: %s\n",cfg.asset.mac.c_str());
@@ -610,11 +676,11 @@ void showCFG(Config &cfg){
     
     //int sz = sizeof(cfg.product);
     //Serial.println(sz);
-    Serial.printf("\nProduct Information\n");
+    Serial.printf("\nProduct Information\n"); 
     for(int i=0;i<3;i++){
         Serial.printf("  SKU[%d]: %s\n",i,cfg.product[i].sku.c_str());
-        Serial.printf("  Price[%d]: %.2f\n",i,cfg.product[i].price);
-        Serial.printf("  Stime[%d]: %d\n",i,cfg.product[i].stime);
+        Serial.printf("   |-Price[%d]: %.2f\n",i,cfg.product[i].price);
+        Serial.printf("   |-Stime[%d]: %d\n",i,cfg.product[i].stime);
     }
 
     // sz = sizeof(cfg.wifissid);

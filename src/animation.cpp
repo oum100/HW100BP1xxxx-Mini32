@@ -18,15 +18,21 @@ uint8_t RUNBOX2[] = { 0x00, 0b01011100, 0b01100011, 0x00 };
 digitdisplay::digitdisplay(uint8_t pinClk, uint8_t pinDIO):SevenSegmentFun(pinClk, pinDIO){};
 
 void digitdisplay :: animation1(SevenSegmentTM1637 &disp,int dtime,int repeat){
-    uint8_t buffer[4]={B01011100,B01100011,0,0};
+  animation1(disp,dtime,repeat,0);
+}
+
+void digitdisplay :: animation1(SevenSegmentTM1637 &disp,int dtime,int repeat,int col){
+    uint8_t buffer[4]={0,0,0,0};
+
     for(int i=0;i<repeat;i++){
-        if(buffer[0]==B01100011){
-            buffer[0]=B01011100;
-            buffer[1]=B01100011;  
+        if(buffer[col]==B01100011){
+            buffer[col]=B01011100;
+            buffer[col+1]=B01100011;  
         }else{
-            buffer[0]=B01100011;
-            buffer[1]=B01011100;     
+            buffer[col]=B01100011;
+            buffer[col+1]=B01011100;     
         }
+
         disp.printRaw(buffer);
         delay(dtime);
     }
@@ -54,7 +60,6 @@ void digitdisplay :: animation2(SevenSegmentTM1637 &disp,int dtime,int repeat){
     delay(dtime);
   }  
 }
-
 
 
 void digitdisplay :: animation3(SevenSegmentTM1637 &disp,int dtime,int repeat){
