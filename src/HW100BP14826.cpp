@@ -57,24 +57,25 @@ bool BP14826::ctrlPower(int pwrPin, int machineDC,powerMODE mode){
     Serial.println();
     Serial.print("Performing ctrlPower\n");
     // pulseGEN(HIGH,1,1000,pwrPin);
-    if(mode == 1){  // Power ON machine
-      delay(1000);
+    if(mode == 1){  // You want to Power ON machine
+      delay(500);
+
       if(!isMachineON(machineDC)){ // Check machineDC if 0 (off) then power ON it.
         Serial.println("[ctrlPower]: Turning on machine");
-        pulseGEN(HIGH,1,1000,pwrPin);
-        // delay(1000);
+        pulseGEN(HIGH,1,1000,pwrPin);  //Turn on
+        delay(1500); //Add delay
         if(isMachineON(machineDC)){
           Serial.println("[ctrlPower]: Machine is on");
           return true;
         }else{
           Serial.println("[ctrlPower]: Machine not responseding power on");
-          return true; 
+          return false; 
         }
       }else{
         Serial.println("[ctrlPower]: Machine is already on");
         return true;
       }
-    }else{    //Power off machine
+    }else{    //You want to Power off machine
       Serial.println("Waiting for checking machine of 30sec.");
       // delay(39000);
       if(isMachineON(machineDC)){ // Check machineDC if 0 (off) then power ON it.
@@ -83,39 +84,24 @@ bool BP14826::ctrlPower(int pwrPin, int machineDC,powerMODE mode){
         delay(1000);
         if(!isMachineON(machineDC)){
           Serial.println("[ctrlPower]: Machine is completely off");
-          return true;
+          return true; //Turn off successful
         }else{
           Serial.println("[ctrlPower]: Machine not responseding power off");
           return false; 
         }
-        // do{
-        //   pulseGEN(HIGH,1,1000,pwrPin);
-        //   delay(moretime);
-        //   moretime+=500;
-        //   retrylimit++;
-        // }while( (isMachineON(machineDC)==true) && (retrylimit<3) );
-        // if(retrylimit>=3){
-        //   Serial.println("[ctrlPower]: Machine is not responding");
-        //   return false;
-        // }else{
-        //   Serial.println("[ctrlPower]: Machine is off");
-        //   return true;
-        // }
       }else{
-        //Test machine is really off ?
-        pulseGEN(HIGH,1,1000,pwrPin);
+        //Machine is off
+        pulseGEN(HIGH,1,1000,pwrPin);   //Machine is of then turn on first. Then if on turn it off.
         if(isMachineON(machineDC)){
           Serial.println("[ctrlPower]: Machine suppose to be off. But it is on then turn it off again.");
           pulseGEN(HIGH,1,1000,pwrPin);
+          
         }else{
           Serial.println("[ctrlPower]: Machine is already off");
         }
-        return true;
+        return true;  //Turn off successful
       }
     }
-    
-    // Serial.print("Finish ctrlPower\n");
-    // return isMachineON(machineDC);
 }
 
 void BP14826::ctrlSpeed(int speed){
@@ -222,125 +208,105 @@ void BP14826::ctrlProg(int prog){
   Serial.println();
 }
 
-void BP14826::selfTest(){
+void BP14826::selfTest(void){
   Serial.println("[selfTest]: Performing selfTest");
   washProgram(QUICK,0,0,0);
 }
 
+
+void BP14826::ctrlReset(void){
+  Serial.println("[ctrlReset]->request cancel job.");
+
+  if(isMachineON(MACHINEDC)){ //Machine is on   latest update 19Mar25 create technic1 and 2. but 2 is better.
+    Serial.println("[ctrlReset]->Machine now is on.");
+
+    //Technic 2  to maker sure door is unlock 
+    ctrlPower(POWER_RLY,MACHINEDC,TURNOFF);
+    ctrlPower(POWER_RLY,MACHINEDC,TURNON);
+    delay(500);
+    ctrlPower(POWER_RLY,MACHINEDC,TURNOFF);
+
+  }else{ //Machine is off
+    Serial.println("[ctrlReset]->Machine now is off");
+    Serial.println("TurnON --> 500ms --> TurnOff");
+    ctrlPower(POWER_RLY,MACHINEDC,TURNON);
+    delay(500);
+    ctrlPower(POWER_RLY,MACHINEDC,TURNOFF);
+  }
+}
+
+
+void BP14826::ctrlCancel(void){
+  Serial.println("[ctrlCancel]->request cancel job. By turn machine off.");
+  ctrlPower(POWER_RLY,MACHINEDC,TURNOFF);
+  // if(isMachineON(MACHINEDC)){ //Machine is on   latest update 19Mar25 create technic1 and 2. but 2 is better.
+  //   Serial.println("[ctrlCancel]->Machine now is on. Then Turn off machine.");
+  //   ctrlPower(POWER_RLY,MACHINEDC,TURNOFF);
+  // }else{ //Machine is off
+  //   Serial.println("[ctrlCancel]->Machine now is off");
+  // }
+}
+
+
 bool BP14826::washProgram(int prog, int tmp, int speed, int rinse) {
   Serial.print("[washProgram]: Performing washProgram\n");
-  ctrlPower(POWER_RLY,MACHINEDC,TURNON); 
-  delay(500);
-  // Added 7Aug23: Fixed bug continue run same program. then setting rinse error. So, set to default  prog 0 first.
-  if(prog == 0){ 
-    ctrlProg(QUICK);
-    delay(500);
-  }else{
-    ctrlProg(MIX);
-    delay(500);
-  }
-  //**********************************************************************
-  
-  ctrlProg(prog);
-  delay(500);
+  // ctrlPower(POWER_RLY,MACHINEDC,TURNON); 
+  // delay(500);
+  if(ctrlPower(POWER_RLY,MACHINEDC,TURNON)){
+    // Added 7Aug23: Fixed bug continue run same program. then setting rinse error. To fix this force machine
+    // set to MIX first then set as request program again.
+      if(prog == 0){ 
+        ctrlProg(QUICK);
+        delay(500);
+      }else{
+        ctrlProg(MIX);
+        delay(500);
+      }
+      //**********************************************************************
+      
+      ctrlProg(prog);
+      delay(500);
 
-  if(tmp > 0){
-    ctrlTemp(tmp);
-    delay(500);
-  }
-
-  if(speed > 0){
-    ctrlSpeed(speed);
-    delay(500);
-  }
-
-  if(rinse > 0){
-    ctrlRinse(rinse);
-    delay(500);
-  }
-
-  // Set delay wait for customer
-  // ctrlStart(); //Start
-  // ctrlStart(); //Stop
-  //delay(500);
-  int startTryCount=0;
-  do{
-    ctrlStart();
-    Serial.printf("[washProgram] --> Start program %d try\n",startTryCount+1);
-    startTryCount++;
-    delay(5000);
-  }while( (!isDoorLock(DLOCK)) && (startTryCount <3) );
-
-  if(isDoorLock(DLOCK)){
-    Serial.print("[washProgram]: start successful.\n");
-    return 1;
-  }else{
-    Serial.print("[washProgram]: Failed to start\n");
-    pulseGEN(HIGH,20,500,BOOK_LED);
-    return 0;
-  }
-  
-}
-
-int BP14826::runProgram(int prog, int tmp, int speed ,int rinse,LiquidCrystal_I2C &lcd,int &err){
-  int retry = 0;
-
-  while(retry < 3){
-    if(!isMachineON(MACHINEDC)){
-        ctrlPower(POWER_RLY,MACHINEDC,TURNON); // Power on machine
-        Serial.printf("[runProgram]-> Power On machine, But machine not response. Retry:%d\n",retry+1);
-        retry++;
-    }else{
-        Serial.printf("[runProgram]-> Power On machine, Machine response. Retry:%d\n",retry++);
-        //Setting washing program
-        ctrlProg(prog); // Set program sport
+      if(tmp > 0){
         ctrlTemp(tmp);
+        delay(500);
+      }
+
+      if(speed > 0){
         ctrlSpeed(speed);
-        ctrlRinse(rinse); // Set rinse program to 2
-        delay(5000);
-        ctrlStart();
-        return 1;    // Washing start sucessfuly
-    }
-  }
-  if(retry >= 3){
-    lcd.clear();
-    lcd.setCursor(0,0);
-    lcd.print("Program not ON");
-    delay(3000);
-    return 0;
+        delay(500);
+      }
+
+      if(rinse > 0){
+        ctrlRinse(rinse);
+        delay(500);
+      }
+
+
+      int startTryCount=0;
+      do{
+        if(startTryCount < 3){
+          ctrlStart();
+          startTryCount++;
+          Serial.printf("[washProgram] --> Starting program time %d\n",startTryCount);
+          switch(startTryCount){  // increase delay for each retry
+            case 1: delay(5000); break;
+            case 2: delay(8000); break;
+            case 3: delay(11000); break;
+          }
+        }else{
+          Serial.print("[washProgram]: Machine Failed to start\n");
+          return false;
+        }
+        // delay(300);
+      }while( (!isDoorLock(DLOCK)) && (startTryCount < 3) );
+      Serial.print("[washProgram]: Machine start successful.\n");
+      return true;
+  }else{
+    Serial.print("[washProgram]: Machine start failed.\n");
+    return false;
   }
 }
-
-int BP14826::runProgram(int prog,int tmp, int speed ,int rinse,digitdisplay &disp,int &err){
-  int retry = 0;
-
-  while(retry < 3){
-    if(!isMachineON(MACHINEDC)){
-        ctrlPower(POWER_RLY,MACHINEDC,TURNON); // Power on machine
-        Serial.printf("[runProgram]-> Power On machine, But machine not response. Retry:%d\n",retry+1);
-        retry++;
-    }else{
-        Serial.printf("[runProgram]-> Power On machine, Machine response. Retry:%d\n",retry++);
-        //Setting washing program
-        ctrlProg(prog); // Set program sport
-        ctrlTemp(tmp);
-        ctrlSpeed(speed);
-        ctrlRinse(rinse); // Set rinse program to 2
-        delay(5000);
-        ctrlStart();
-        return 1;    // Washing start sucessfuly
-    }
-  }
-  if(retry >= 3){
-      disp.scrollingText("-PgE-",5);
-      disp.print("PgE");
-      delay(3000);
-      return 0;
-  }
-}
-
-
-
 
 bool BP14826::isMachineON(int pin){
     int err;
@@ -359,11 +325,41 @@ bool BP14826::isMachineON(int pin,int &err){
 
 
 bool BP14826::isDoorLock(int pin){
-    if(digitalRead(pin)){
-        Serial.printf("[isDoorClose]->Door Lock\n");
+    bool doorState;
+    int countLock = 0;
+    int countUnlock = 0;
+
+    doorState = digitalRead(pin);
+    
+    // for(int i =1;i>=3;i++){
+    //    delay(300);
+    //   if(digitalRead(pin)){
+    //     countLock++;
+    //   }else{
+    //     countUnlock++;
+    //   }
+     
+    // }
+
+    // Serial.print("countLock:");Serial.println(countLock);
+    // Serial.print("countUnlock:");Serial.println(countUnlock);
+
+    // if(countLock < countUnlock){
+    //   doorState = true;
+    // }else{
+    //   doorState = false;
+    // }
+
+
+    
+    //May need to use value from interrupt
+
+    if(doorState){ 
+        Serial.printf("[isDoorLock]->Door Lock\n");
         return true; // Door Lock
     }else{
-        Serial.printf("[isDoorClose]->Door Unlock\n");
+        Serial.printf("[isDoorLock]->Door Unlock\n");
         return false; //Door Unlock
     }
 }
+

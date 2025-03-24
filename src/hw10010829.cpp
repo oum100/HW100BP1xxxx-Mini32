@@ -3,11 +3,13 @@
 //#include "startup.h"
 
 
+BP10829::BP10829(void){
 
+}
 
-enum buttons{POWER,UP,DOWN, START,RINSE,TEMP,SPIN,WORK};
+// enum buttons{POWER,UP,DOWN, START,RINSE,TEMP,SPIN,WORK};
 
-void bcdconverter(int value, int *bit3, int *bit2, int *bit1, int *bit0){
+void BP10829::bcdconverter(int value, int *bit3, int *bit2, int *bit1, int *bit0){
 
 
   switch(value){
@@ -19,19 +21,19 @@ void bcdconverter(int value, int *bit3, int *bit2, int *bit1, int *bit0){
       case  5:  *bit3=0; *bit2=1; *bit1=0; *bit0=1; break; // Temp    
       case  6:  *bit3=0; *bit2=1; *bit1=1; *bit0=0; break; // Spin
       case  7:  *bit3=0; *bit2=1; *bit1=1; *bit0=1; break; // BUSY
-      case  8:  *bit3=1; *bit2=0; *bit1=0; *bit0=0; break;
-      case  9:  *bit3=1; *bit2=0; *bit1=0; *bit0=1; break;
-      case  10:  *bit3=1; *bit2=0; *bit1=1; *bit0=0; break;
-      case  11:  *bit3=1; *bit2=0; *bit1=1; *bit0=1; break;
-      case  12:  *bit3=1; *bit2=1; *bit1=0; *bit0=0; break;
-      case  13:  *bit3=1; *bit2=1; *bit1=0; *bit0=1; break;
-      case  14:  *bit3=1; *bit2=1; *bit1=1; *bit0=0; break;      
-      case  15:  *bit3=1; *bit2=1; *bit1=1; *bit0=1; break;     
+      case  8:  *bit3=1; *bit2=0; *bit1=0; *bit0=0; break; // N/A
+      case  9:  *bit3=1; *bit2=0; *bit1=0; *bit0=1; break; // N/A
+      case  10:  *bit3=1; *bit2=0; *bit1=1; *bit0=0; break; // N/A
+      case  11:  *bit3=1; *bit2=0; *bit1=1; *bit0=1; break; // N/A
+      case  12:  *bit3=1; *bit2=1; *bit1=0; *bit0=0; break; // N/A
+      case  13:  *bit3=1; *bit2=1; *bit1=0; *bit0=1; break; // N/A
+      case  14:  *bit3=1; *bit2=1; *bit1=1; *bit0=0; break;   // N/A   
+      case  15:  *bit3=1; *bit2=1; *bit1=1; *bit0=1; break;   // N/A  
   }
 }
 
 
-void buttonCtrl( int button, int pulse, int duty){
+void BP10829::buttonCtrl( int button, int pulse, int duty){
   int digit0=0, digit1=0,digit2=0,digit3=0;
 
   switch(button) {
@@ -139,7 +141,7 @@ void buttonCtrl( int button, int pulse, int duty){
   }
 }
 
-void selftest(int IO0,int IO1,int IO2, int CTRLSW){ //IO) GPIO addr bit 0, IO1 bit 1, IO2 bit2
+void BP10829::selftest(int IO0,int IO1,int IO2, int CTRLSW){ //IO) GPIO addr bit 0, IO1 bit 1, IO2 bit2
   int bb3=0,bb2=0,bb1=0,bb0=0;
   for(int i = 0;i<16;i++){
     bcdconverter(i,&bb3,&bb2,&bb1,&bb0);
@@ -159,7 +161,7 @@ void selftest(int IO0,int IO1,int IO2, int CTRLSW){ //IO) GPIO addr bit 0, IO1 b
 
 
 // This use for check status of ldr at specific location.
-bool isHome(int pin){
+bool BP10829::isHome(int pin){
   bool pstate = true;
   int i = 0;
 
@@ -173,12 +175,11 @@ bool isHome(int pin){
     return true;
   }else{
     return false;
-    
   }
 }
 
 
-bool startProg(int prognum){
+bool BP10829::startProg(int prognum){
 
   buttonCtrl(POWER,1,1000);
 
@@ -199,7 +200,7 @@ bool startProg(int prognum){
     /*  Regent use case 11, 12, 13 */
     switch(prognum){
       case 1:
-          //  At Quick mode 20 degree, 2rinse, 23mins
+          //  At Quick mode ,temp 20, rinse 2, 23mins
           buttonCtrl(RINSE,2,200);   //Set temp to 0degree;
           buttonCtrl(TEMP,2,200);   //Set temp to 30degree;
           break;
@@ -211,7 +212,7 @@ bool startProg(int prognum){
       case 3:
           // From Cotton  send 11 pulse to set Quick 15min with 40degree , 2rinse . 38mins
           buttonCtrl(RINSE,2,200);   //Set temp to 0degree;
-          buttonCtrl(TEMP,4,200);   //Set temp to 30degree;
+          buttonCtrl(TEMP,4,200);   //Set temp to 40degree;
           break;     
       case 11:   // Quick wash 15 min, 2 rinse, 20degre
           for(int i = 1;i<=11;i++){
@@ -225,6 +226,7 @@ bool startProg(int prognum){
           break;
       case 13:
           break;
+      
     }
 
     delay(2000);// Set Delay wait for customer insert detergent.
@@ -234,3 +236,131 @@ bool startProg(int prognum){
     return false;
   }
 }
+
+void BP10829::pulseGEN(bool logic, int qty, int width, int object){
+
+}
+
+void BP10829::ctrlStart(){
+  buttonCtrl(START,1,200);
+}
+
+bool BP10829::ctrlPower(int pwrPin, int machineDC,powerMODE mode){
+  buttonCtrl(POWER,1,1000);
+  return true;
+
+  /*  //Not use yet
+  int moretime=500;
+  int retrylimit=0;
+  Serial.println();
+  Serial.print("Performing ctrlPower\n");
+  // pulseGEN(HIGH,1,1000,pwrPin);
+  if(mode == 1){  // You want to Power ON machine
+    delay(500);
+
+    if(!isMachineON(machineDC)){ // Check machineDC if 0 (off) then power ON it.
+      Serial.println("[ctrlPower]: Turning on machine");
+      pulseGEN(HIGH,1,1000,pwrPin);  //Turn on
+      if(isMachineON(machineDC)){
+        Serial.println("[ctrlPower]: Machine is on");
+        return true;
+      }else{
+        Serial.println("[ctrlPower]: Machine not responseding power on");
+        return false; 
+      }
+    }else{
+      Serial.println("[ctrlPower]: Machine is already on");
+      return true;
+    }
+  }else{    //You want to Power off machine
+    Serial.println("Waiting for checking machine of 30sec.");
+    // delay(39000);
+    if(isMachineON(machineDC)){ // Check machineDC if 0 (off) then power ON it.
+      Serial.println("[ctrlPower]: Turning off machine");
+      pulseGEN(HIGH,1,1000,pwrPin);
+      delay(1000);
+      if(!isMachineON(machineDC)){
+        Serial.println("[ctrlPower]: Machine is completely off");
+        return true; //Turn off successful
+      }else{
+        Serial.println("[ctrlPower]: Machine not responseding power off");
+        return false; 
+      }
+    }else{
+      //Machine is off
+      pulseGEN(HIGH,1,1000,pwrPin);   //Machine is of then turn on first. Then if on turn it off.
+      if(isMachineON(machineDC)){
+        Serial.println("[ctrlPower]: Machine suppose to be off. But it is on then turn it off again.");
+        pulseGEN(HIGH,1,1000,pwrPin);
+      }else{
+        Serial.println("[ctrlPower]: Machine is already off");
+      }
+      return true;  //Turn off successful
+    }
+  }
+  */
+}
+
+void BP10829::ctrlSpeed(int speed){
+  buttonCtrl(SPIN,1,200);
+}
+
+void BP10829::ctrlTemp(int tmp){
+  buttonCtrl(TEMP,1,200);
+}
+void BP10829::ctrlRinse(int rinse){
+  buttonCtrl(RINSE,1,200);
+}
+void BP10829::ctrlProg(int prog){}
+void BP10829::selfTest(){}
+
+
+bool BP10829::washProgram(int prog, int tmp, int speed, int rinse){
+  Serial.print("[washProgram]: Performing washProgram\n");
+
+  if(ctrlPower(POWER_RLY,MACHINEDC,TURNON)){
+    return true;
+  }else{
+    return false;
+  }
+}
+
+
+int BP10829::runProgram(int prog, int tmp, int speed ,int rinse,LiquidCrystal_I2C &lcd,int &err){
+  return false;
+}
+int BP10829::runProgram(int prog,int tmp, int speed ,int rinse,digitdisplay &disp,int &err){
+  return false;
+}
+// void progStart();
+// void servicEnd();
+
+bool BP10829::isMachineON(int pin){
+    int err;
+    return isMachineON(pin,err);
+}// 1 = ON, 0 = Off
+
+bool BP10829::isMachineON(int pin,int &err){
+    if(digitalRead(pin)){
+        Serial.printf("[isMachineOn]-> OFF\n");
+        return false;
+    }else{
+        Serial.printf("[isMachineOn]-> ON\n");
+        return true;
+    }
+}// 1 = ON, 0 = Off
+
+bool BP10829::isDoorLock(int pin){
+    bool doorState = false;
+    doorState = digitalRead(pin);
+
+    if(doorState){
+        Serial.printf("[isDoorLock]->Door Lock\n");
+        return true; // Door Lock
+    }else{
+        Serial.printf("[isDoorLock]->Door Unlock\n");
+        return false; //Door Unlock
+    }
+}
+
+

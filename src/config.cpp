@@ -61,6 +61,9 @@ void blinkGPIO(int pin, int btime){
     }
 }
 
+void toggleGPIO(int pin){
+    digitalWrite(pin, !digitalRead(pin));
+}
 
 void getnvPbCFG(Preferences nvcfg, Config &cfg){
   Serial.printf("  Getting Payboard Configuration from NV\n");
@@ -118,6 +121,7 @@ int getnvProduct(Preferences nvcfg, Config &cfg){
         cfg.product[0].sku = nvcfg.getString("sku1");
         cfg.product[0].price = nvcfg.getFloat("price1");
         cfg.product[0].stime = nvcfg.getInt("stime1");
+        cfg.product[0].unit = nvcfg.getInt("unit1");
         prodcount++;
     }
 
@@ -125,6 +129,7 @@ int getnvProduct(Preferences nvcfg, Config &cfg){
         cfg.product[1].sku = nvcfg.getString("sku2");
         cfg.product[1].price = nvcfg.getFloat("price2");
         cfg.product[1].stime = nvcfg.getInt("stime2");
+        cfg.product[1].unit = nvcfg.getInt("unit2");
         prodcount++;
     }
 
@@ -132,6 +137,7 @@ int getnvProduct(Preferences nvcfg, Config &cfg){
         cfg.product[2].sku = nvcfg.getString("sku3");
         cfg.product[2].price = nvcfg.getFloat("price3");
         cfg.product[2].stime = nvcfg.getInt("stime3");
+        cfg.product[2].unit = nvcfg.getInt("unit3");
         prodcount++;
     }
   Serial.printf("  Completed get Product Configuration\n");
@@ -231,8 +237,6 @@ void getNVCFG(Preferences nvcfg, Config &cfg){
             cfg.product[2].stime = nvcfg.getInt("stime3");
         }
 
-
-
     nvcfg.end();
 }
 
@@ -272,7 +276,7 @@ void initCFG(Config &cfg){
     #ifdef HW100BP14826
     cfg.asset.model ="HW100BP10829_V1.4.2";
     #endif
-    cfg.asset.firmware = "1.0.7";
+    cfg.asset.firmware = "1.0.12";
     cfg.asset.ntpServer1="1.th.pool.ntp.org";
     cfg.asset.ntpServer2="asia.pool.ntp.org";
 
@@ -327,14 +331,17 @@ void initCFG(Config &cfg){
     cfg.product[0].sku = "P1";   // Prog Quick 15M, Rinse 2, Temp 30
     cfg.product[0].price = 30;    //RGH18 is 20, Other is 30
     cfg.product[0].stime = 35;
+    cfg.product[0].unit = 2;
 
     cfg.product[1].sku = "P2"; // Prog Cotton 1h , Rinse 2, Temp 30
     cfg.product[1].price = 40;    //RGH18 is 30, Other is 40
-    cfg.product[1].stime = 60;
+    cfg.product[1].stime = 67;
+    cfg.product[1].unit = 2;
 
     cfg.product[2].sku = "P3"; //Prog Cotton 1h, Rinse 2, Temp 60
     cfg.product[2].price = 50;    //RGH18 is 40, Other is 50
-    cfg.product[2].stime = 90;      
+    cfg.product[2].stime = 97;
+    cfg.product[1].unit = 2;      
 
 
 
@@ -676,11 +683,30 @@ void showCFG(Config &cfg){
     
     //int sz = sizeof(cfg.product);
     //Serial.println(sz);
-    Serial.printf("\nProduct Information\n"); 
+    Serial.printf("\nProduct Information\n");
+    Serial.printf(" Product Count: %d\n",sizeof(cfg.product)/sizeof(cfg.product[0]));
     for(int i=0;i<3;i++){
-        Serial.printf("  SKU[%d]: %s\n",i,cfg.product[i].sku.c_str());
-        Serial.printf("   |-Price[%d]: %.2f\n",i,cfg.product[i].price);
-        Serial.printf("   |-Stime[%d]: %d\n",i,cfg.product[i].stime);
+        Serial.printf("  SKU[%d] Name: %s\n",i,cfg.product[i].sku.c_str());
+        Serial.printf("    Price[%d]: %.2f\n",i,cfg.product[i].price);
+        Serial.printf("    Stime[%d]: %d\n",i,cfg.product[i].stime);
+        // Serial.printf("    Unit[%d]: %s\n",i,cfg.product[i].unit);
+        switch(cfg.product[i].unit){  // v1.0.9   3 Aug 2023
+          case 0:
+            Serial.printf("    Unit[%d]: %s\n",i,"None");
+            break;
+          case 1:
+            Serial.printf("    Unit[%d]: %s\n",i,"Second");
+            break;
+          case 2:
+            Serial.printf("    Unit[%d]: %s\n",i,"Minute");
+            break;  
+          case 3:
+            Serial.printf("    Unit[%d]: %s\n",i,"Militer");
+            break;
+          case 4:
+            Serial.printf("    Unit[%d]: %s\n",i,"Liter");
+            break;   
+        }
     }
 
     // sz = sizeof(cfg.wifissid);
@@ -758,3 +784,5 @@ String getdeviceid(void){
     
     return chipname;
 }
+
+

@@ -5,10 +5,12 @@
 #include <Preferences.h>
 
 
+
 struct Product{
     String sku;
     float  price;
     int stime;
+    int unit;
 };
 
 struct SSID{
@@ -73,6 +75,7 @@ void initGPIO(unsigned long long INP, unsigned long long OUTP);
 void initOUTPUT(int inx,byte *pin);
 void initINPUT(int inx, byte *pin);
 void blinkGPIO(int pin, int btime);
+void toggleGPIO(int pin);
 
 
 String cfgJSON(Config &cfg);
@@ -92,7 +95,7 @@ String  assetJSON(Config &cfg);
 void assetJSON2(Config &cfg,String &jsconfig);
 
 String  backendJSON(Config &cfg);
-void backendJSON2(Config &cfg,String &jsconfig);
+// void backendJSON2(Config &cfg,String &jsconfig);
 
 void initCFG(Config &cfg);
 void showCFG(Config &cfg);

@@ -55,8 +55,8 @@ int8_t Timer::every(unsigned long period, void (*callback)(), int repeatCount)
 	_events[i].count = 0;
 
 	Serial.printf("[TIMER]->Period Found: %li msecs\n",_events[i].period);
- Serial.printf("[TIMER]->Period Set: %li Secs\n",_events[i].period/1000);
-  Serial.printf("[TIMER]->eventType Set: %d\n\n",_events[i].eventType);
+ 	Serial.printf("[TIMER]->Period Set: %li Secs\n",_events[i].period/1000);
+  	Serial.printf("[TIMER]->eventType Set: %d\n\n",_events[i].eventType);
 	return i;
 }
 
@@ -142,19 +142,18 @@ void Timer::update(unsigned long now)
 		if ((_events[i].eventType != EVENT_NONE) && (_events[i].eventType != EVENT_PAUSE))
 		{
 			_events[i].update(now);
-
-      getOperTime(i, &xHour, &xMin, &xSec);
-      if(_events[i].operateTime % 1000 == 0){
-          if( xloop == 0){
-            Serial.printf("[Timer][%d]->HH:MM:SS = %02d:%02d:%02d \n",i,xHour,xMin,xSec);
-          }else{
-            if( xloop >= 25){                
-              Serial.printf("[Timer][%d]->HH:MM:SS = %02d:%02d:%02d \n",i,xHour,xMin,xSec);
-              xloop=1;
-            } 
-         }
-      }   
-      xloop++; 
+			getOperTime(i, &xHour, &xMin, &xSec);
+			if(_events[i].operateTime % 1000 == 0){
+				if( xloop == 0){
+					// Serial.printf("[Timer][%d]->HH:MM:SS = %02d:%02d:%02d \n",i,xHour,xMin,xSec);
+				}else{
+					if( xloop >= 25){             
+						// Serial.printf("[Timer]->[%d]->HH:MM:SS = %02d:%02d:%02d \n",i,xHour,xMin,xSec);
+						xloop=1;
+					} 
+				}
+			}   
+      		xloop++; 
 		}   	
 	}
 }

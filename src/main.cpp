@@ -1,10 +1,27 @@
 #include <Arduino.h>
 #include "startup.h"
 
+//V1.0.12
+// 1. Change step in ServiceEnd by moving reset value into if.  Better handling timeout but machine not finish.
+// 2. Add ctrlReset in HW100BP14826
+
+
+//******** v1.0.9 ********
+// 1. เพิ่ม progDrain , progRinseSpin สำหรับการควบคุมโปรแกรม ซัก แบบบังคับให้เต็มประสิทธิภาพเครื่องในเวลาที่ต้องการ
+//    Step 1: บังคับให้ ซักที่ MIX เป็นเวลา 8 นาที แล้วปิดเครื่อง   
+//          แก้ใน progStart() -> washProgram MIX  
+//         เพิ่ม progTimerID = progTimer.after ให้เรื่อก progDrain หลังจากผ่านไป 8 นาที
+//    Step 2: เปิดใหม่ให้ SPIN เป็นเวลา 1 นาที แล้วปิด  (ให้เอาน้ำแฟบออก)
+//          washProgram SPIN
+//          เพิ่ม progTimerID = progTimer.after ให้เรื่อก progRinseSpin หลังจากผ่านไป 1 นาที
+//    Step 3: เปิดใหม่ RINSESPIN แบบ 2 น้ำ ซึ่งจะให้เวลา 26 นาที ปล่อยให้ทำงานจำจบ
+//          washProgram RINSESPIN (0,0,6)
+
 //******** v1.0.8 ********
 // 1. Rename project name to HW100BP1xxxx
 // 2. Add deboncing to interupt 
 // 3. Modify pbBackendMqtt and fpBackendMqtt to have skipPriMqtt and skipSecMqtt
+// 4. Add new machine model HW150BP14896  (HW150BP14896.h and  HW150BP14896.cpp)
 
 
 // ******** v1.0.7 ********
@@ -42,7 +59,7 @@
 void recvMsg(uint8_t *data, size_t len);
 void IRAM_ATTR gpio_isr_handler(void* arg);
 void gpio_task(void *arg);
-void interrupt();
+void init_interrupt();
 void mqttCheckConnection();
 void mqttStateUpdate();
 void pbRegCallback(char* topic, byte* payload, unsigned int length);
@@ -54,8 +71,17 @@ String getUUID();
 void showPrice(SevenSegmentTM1637 &disp,int &count,byte max, byte min);
 void progStart();
 void serviceLeft();
+
 void serviceEnd();
 void resetState();
+void progDrain();
+void progRinseSpin();
+
+
+
+#ifdef USE_RGBLED
+void toggleRGB(CRGB* leds, int ledIndex, CRGB color1, CRGB color2);
+#endif
 
 
 #ifdef FLIPUPMQTT
@@ -63,8 +89,30 @@ void fpCallback(char* topic, byte* payload, unsigned int length);
 void fpBackendMqtt();
 #endif 
 
+#ifdef USE_RGBLED // in startup.h
+  #define NUM_LEDS 1
+  CRGB leds[NUM_LEDS];
 
+  // void blinkRGB(const CRGB &color,int btime,int period){
+  //   unsigned long tymNow;
+  //   for(int i = btime; i<=btime; i++){
+  //     tymNow = millis();
+  //     int num2nds = (tymNow/1000);
+  //     if(num2nds % 2 == 0)fill_solid(leds, NUM_LEDS, color);
+  //     if(num2nds % 2 > 0)fill_solid(leds, NUM_LEDS, color);
+  //     FastLED.show();
+  //   }
+  // }
 
+#endif
+
+#ifdef HW100BP10829
+  BP10829 washer;
+#elif defined(HW100BP14826) || defined(HW100BP14826ALLNEW)
+  BP14826 washer;
+#elif defined(HW150BP14896)
+  BP14896ES9 washer;
+#endif
 
 
 digitdisplay display(CLK,DIO);
@@ -81,6 +129,7 @@ Config cfginfo;
 
 int price[3]={0,0,0};
 int stime[3]= {30,40,50};  // Actual 23, 28, 38      For Skyview
+int unit[3]={2,2,2}; //v1.0.9 add sku unit to 2 (1:Second, 2:Minute, 3:Mililiter, 4:liter)
 int prodcounter=0;
 // int stime[3]= {20,30,40};  // Actual 23, 28, 38      For RGH18
 
@@ -92,12 +141,19 @@ int pricePerCoin=0;
 int paymentby = 0;
 
 // int pb_mqttport=1883;
+int drainTime = 2;  // 20 Jan 25  Add for progDrain function
+int washTime =10;  // 20 Jan 25 add this parameter to set washing time.
+int rinseCount = 2;
+
 int cfgState=0;
 int waitFlag = 0;
 bool dispflag=0;
 int stateflag = 0;
+// bool jobStarted = false;
+bool machineStart = false;
+bool DlockState = true;
 
-int dispCount =0;
+u32_t dispCount =0;
 
 String disperr="";
 String disptxt="";
@@ -105,8 +161,8 @@ bool disponce = 0;
 
 //int bill=0;
 
-Timer serviceTime, waitTime, timeLeft, blinkWiFi, mqttCheck, mqttPing;
-int8_t serviceTimeID,waitTimeID,timeLeftID, blinkWiFiID,mqttCheckID, mqttPingID;
+Timer serviceTime, waitTime, timeLeft, blinkWiFi, mqttPing, blinkRGB, progTimer, progTimer2;
+int8_t serviceTimeID,waitTimeID,timeLeftID, blinkWiFiID, mqttPingID, blinkRGBID, progTimerID, progTimer2ID;
 
 unsigned long stateUpdateTimer=0;
 int updeteAvailable =0; //Every 60 minutes or 1 hour
@@ -168,7 +224,19 @@ int wifitimeout = 5; //in Minutes
 
 //AsyncWebServer server(80);
 
-
+#ifdef USE_RGBLED
+void toggleRGB(CRGB* leds, int ledIndex, CRGB color1, CRGB color2) {
+    if (leds[ledIndex] == color2) {
+      leds[ledIndex] = color1;  // Turn specified LED on
+      // Serial.println("ToogleRGB Set Color1");
+    } else {
+      leds[ledIndex] = color2;  // Turn specified LED off
+      // Serial.println("ToogleRGB Set Color2");
+    }
+    FastLED.show();  // Update the LED display
+    delay(500);
+}
+#endif
 
 
 
@@ -209,6 +277,23 @@ void IRAM_ATTR gpio_isr_handler(void* arg)
 
 }
 
+void IRAM_ATTR coinISR() {
+  if((cfgState >= 3) && (cfgState <= 5)){
+    unsigned long currentTime = millis();
+    if ((currentTime - lastDebounceTime) > debounceDelay) {
+      coinValue = coinValue + pricePerCoin;
+      Serial.printf("coinISR:->CoinValue: %d\n", coinValue);
+      lastDebounceTime = currentTime;
+    }
+  }
+}
+
+void IRAM_ATTR dlockISR(){
+  if(cfgState == 5){
+
+  }
+}
+
 
 void gpio_task(void *arg){
     gpio_num_t io_num;  
@@ -219,27 +304,26 @@ void gpio_task(void *arg){
         } 
 
         switch (io_num){
+
+            #ifdef COININ
             case COININ:
                 if(gpio_get_level(io_num) == 0){
-                  if((cfgState >= 3) && (cfgState >= 5)){
+                  if((cfgState >= 3) && (cfgState <= 5)){
                     paymentby = 1;  // Set 1 = paymentby COIN
                     coinValue = coinValue + pricePerCoin;
                     Serial.printf("CoinValue: %d\n", coinValue);
                   }
                 }  
-
-                /* //Before 1.0.8
-                
-                (gpio_get_level(io_num) == 0)?coin++:coin=coin;  
-                Serial.printf("Coin now: %d\n", coin); 
-                coinValue = pricePerCoin * coin;
-                Serial.printf("CoinValue: %d\n", coinValue);
-                paymentby = 1;
-                */
                 break;
+            #endif
+            
+            #ifdef BILLIN
             // case BILLIN:
             //     (gpio_get_level(io_num) == 0)?bill++:bill=bill; 
             //     break;
+            #endif
+
+            #ifdef DSTATE
             case DSTATE:
                 if(gpio_get_level(io_num) == 0){
                   Serial.printf("[intr]->Door Open\n");
@@ -247,8 +331,22 @@ void gpio_task(void *arg){
                   Serial.printf("[intr]->Door Close\n");
                 }
                 break;
+            #endif
+
+            #ifdef MODESW
             case MODESW:
-                break;
+              break;
+            #endif
+
+            case DLOCK:
+              if(gpio_get_level(io_num) == 0){
+                DlockState = 0; 
+                Serial.printf("DLock Stage: UnLock");
+              }else{
+                DlockState = 1; 
+                Serial.printf("DLock Stage: Lock");
+              }
+              break;
             default:
                 break;
         }  
@@ -257,7 +355,7 @@ void gpio_task(void *arg){
 
 
 
-void interrupt(){
+void init_interrupt(){
 
     io_config.intr_type = GPIO_INTR_NEGEDGE;
     io_config.pin_bit_mask = INTERRUPT_SET;
@@ -276,6 +374,10 @@ void interrupt(){
     //install gpio isr service
     gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
 
+    #ifdef COINENABLE
+      gpio_isr_handler_add((gpio_num_t)COININ, gpio_isr_handler, (void*) COININ);
+    #endif
+
     #ifdef HW100BP10829V200
       gpio_isr_handler_add((gpio_num_t)COININ, gpio_isr_handler, (void*) COININ);
     #endif
@@ -286,6 +388,54 @@ void interrupt(){
         gpio_isr_handler_add((gpio_num_t)MODESW, gpio_isr_handler, (void*) MODESW);
     #endif
 }
+
+#ifdef SHADOWPAYBOARD    //define in startup.h file
+  shadowPb shadowPbCoinTrans;
+#endif
+
+/*   --------------------------------------- WiFi Connection ---------------------------------------------*/
+
+void connectToWiFi(WiFiMulti& wifiMulti, int maxRetries, bool restartOnFailure) {
+  int retryCount = 0;
+
+  Serial.print("Connecting to Wi-Fi");
+
+  // Keep trying to connect until the retry limit is reached
+  while (wifiMulti.run() != WL_CONNECTED && retryCount < maxRetries) {
+    delay(1000);
+
+    #if defined (TM1637)
+      display.print("nC"); //WiFi config
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #elif defined(USE_BOOKLED)
+      toggleGPIO(BOOK_LED);
+    #elif defined(USE_RGBLED)
+      toggleRGB(leds,0,CRGB::Magenta, CRGB::Black);
+    #endif
+
+    Serial.print(".");
+    retryCount++;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWi-Fi connected!");
+    // Serial.print("IP Address: ");
+    // Serial.println(WiFi.localIP());
+    WiFiinfo();
+  } else {
+    Serial.println("\nFailed to connect to Wi-Fi.");
+    
+    if (restartOnFailure) {
+      Serial.println("Restarting ESP32...");
+      delay(1000); // Wait a second before restarting
+      ESP.restart();  // Restart the ESP32
+    } else {
+      Serial.println("No restart. Continuing...");
+    }
+  }
+}
+
 
 /*   --------------------------------------- Added 2 Aug 23 ---------------------------------------------*/
 
@@ -399,7 +549,12 @@ void pbRegCallback(char* topic, byte* payload, unsigned int length){
       cfgdata.putString("uuid",cfginfo.payboard.uuid);
       cfgdata.end();
 
-      display.print("UC"); //UUID /config
+      #if defined (TM1637)
+        display.print("UC"); //UUID /config
+      #elif defined(HT16K33)
+      #elif defined(LCD1602)
+      #endif
+
       delay(200);
       cfgState = 2; // Register 
     }
@@ -483,42 +638,66 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
   Serial.println(action);
 
   if(action == "config"){
-    display.scrollingText("ConF",2); // Accepted Config
+    #if defined(TM1637)
+      display.scrollingText("A-CF",2);
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+      lcdText(0,0,"Action: Config",1000);
+    #endif   
+
     int sz = doc["detail"].size();
     Serial.printf("detail array size: %d\n",sz);
 
     cfgdata.begin("config",false);
-
-    cfgdata.putString("merchantid",cfginfo.payboard.merchantid);
+    // cfgdata.putString("merchantid",cfginfo.payboard.merchantid);
 
     for(int x=0;x<(3-sz);x++){
       Serial.printf(" delete index: %d\n",3-x);
       cfgdata.putString(("sku"+ String(3-x)).c_str(),"");
       cfgdata.putFloat(("price"+String(3-x)).c_str(),0);
-      cfgdata.putInt(("stime"+ String(3-x)).c_str(),0);      
+      cfgdata.putInt(("stime"+ String(3-x)).c_str(),0);    
+      cfgdata.putInt(("unit"+ String(3-x)).c_str(),0);     //v1.0.9  
       price[2-x]=0;
-
     }  
 
     for(int i=0;i<sz;i++){
       String sku = doc["detail"][i]["sku"].as<String>();
       price[i] = doc["detail"][i]["price"].as<float>();
-      // stime[]={30,40,40};
+
+      // v1.0.9  add period and unit into product
+      stime[i] = doc["detail"][i]["period"].as<int>();
+      unit[i] = doc["detail"][i]["unit"].as<int>();
+      
+      
+      if(int(stime[i]) == 0){
+        Serial.println("Calculate stime");
+        if(price[i] > 10){
+          stime[i] = (price[i]/10)*15;
+        }else{
+          stime[i] = price[i];
+        }  
+      }
 
       Serial.print("sku"+ String(i+1) +": ");
       Serial.println(sku);
-      Serial.print("price"+String(i+1)+": ");
+      Serial.print(" |-price"+String(i+1)+": ");
       Serial.println(price[i]);
+      Serial.print(" |-stime"+String(i+1)+": ");
+      Serial.println(stime[i]);  
+      Serial.print(" |-unit"+String(i+1)+": ");
+      Serial.println(unit[i]);
 
       cfgdata.putString(("sku"+ String(i+1)).c_str(),sku);
       cfgdata.putFloat(("price"+String(i+1)).c_str(),price[i]);
       cfgdata.putInt(("stime"+ String(i+1)).c_str(),stime[i]);
+      cfgdata.putInt(("unit"+ String(i+1)).c_str(),unit[i]); // v1.0.9 3 Aug 2023
 
       cfginfo.product[i].sku = sku;
       cfginfo.product[i].price = price[i];
       cfginfo.product[i].stime = stime[i];
+      cfginfo.product[i].unit = unit[i]; // v1.0.9 3 Aug 2023
 
-      Serial.printf("Saving stime[%d]: %d\n",i,stime[i]);
+      Serial.printf("   |- New stime[%d]: %d was saved\n",i,stime[i]);
     }
 
     cfgdata.end();
@@ -644,7 +823,13 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
       mqflipup.publish(fpPubTopic.c_str(),jsonmsg.c_str());
     #endif  
   }else if(action == "setmac"){
-    display.scrollingText("S-Addr",2); // Accepted Config
+    
+    #if defined (TM1637)
+      display.scrollingText("S-Addr",2); // Accepted Config
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
+
     Serial.printf("Response for action: setmac.\n");
     String newmac = doc["mac"].as<String>();
 
@@ -686,7 +871,12 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     ESP.restart();
 
   }else if(action == "delmac"){
-    display.scrollingText("d_Addr",2);
+    
+    #if defined (TM1637)
+      display.scrollingText("d_Addr",2);
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
     Serial.printf("Response for action: delete mac.\n");
 
     cfgdata.begin("config",false);
@@ -723,7 +913,11 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     ESP.restart(); 
   }else if(action == "paid"){
     //Paid and then start service.
-    display.scrollingText("PAId",2);
+    #if defined (TM1637)
+      display.scrollingText("PAId",2);
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
     Serial.printf("Response for action: paid.\n");
 
     paymentby = 2; // 1=coin, 2= qr, 3=kiosk , 4 = free
@@ -773,7 +967,11 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     doc["desc"]="accepted transaction: " + trans;
     */
   }else if(action == "ping"){
-    display.scrollingText("Ping",2);
+    #if defined (TM1637)
+      display.scrollingText("Ping",2);
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
     Serial.printf("response action PING\n"); 
 
     doc.clear();
@@ -800,12 +998,16 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     doc["timeRemain"] = timeRemain;
 
   }else if( (action == "reset") || (action=="reboot") || (action=="restart")){
-    display.scrollingText("RSt",2); 
+    #if defined (TM1637)
+      display.scrollingText("RSt",2);
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
       //set stateflag = 2 flag
     Serial.printf("Accept request action reboot\n");
 
     cfgdata.begin("config",false);
-    cfgdata.putInt("stateflag",1);
+    cfgdata.putInt("stateflag",1);  //To handle stateflag = 5  then reboot too.
     cfgdata.end();
 
     doc.clear();
@@ -834,25 +1036,36 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     ESP.restart();
 
   }else if(action == "ota"){
-    display.scrollingText("OtA",2);
-    #ifdef HW100BP10829
-    secureEsp32FOTA esp32OTA("HW100BP10829", cfginfo.asset.firmware.c_str());
-    #endif
-
-    #ifdef HW100BP14826
-    secureEsp32FOTA esp32OTA("HW100BP14826", cfginfo.asset.firmware.c_str());
-    #endif
     WiFiClientSecure clientForOta;
     digitalWrite(ENCOIN,LOW); // ENCoin off
 
-    esp32OTA._host="www.flipup.net"; //e.g. example.com
+    #if defined (TM1637)
+      display.scrollingText("OtA",2);
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
+
     #ifdef HW100BP10829
+    secureEsp32FOTA esp32OTA("HW100BP10829", cfginfo.asset.firmware.c_str());
     esp32OTA._descriptionOfFirmwareURL="/firmware/HW100BP10829/firmware.json"; //e.g. /my-fw-versions/firmware.json
     #endif
 
     #ifdef HW100BP14826
+    secureEsp32FOTA esp32OTA("HW100BP14826", cfginfo.asset.firmware.c_str());
     esp32OTA._descriptionOfFirmwareURL="/firmware/HW100BP14826/firmware.json"; //e.g. /my-fw-versions/firmware.json
     #endif
+
+    #ifdef HW100BP14826ALLNEW
+    secureEsp32FOTA esp32OTA("HW100BP14826ALLNEW", cfginfo.asset.firmware.c_str());
+    esp32OTA._descriptionOfFirmwareURL="/firmware/HW100BP14826ALLNEW/firmware.json"; //e.g. /my-fw-versions/firmware.json
+    #endif
+
+    #ifdef HW150BP14896
+    secureEsp32FOTA esp32OTA("HW150BP14896", cfginfo.asset.firmware.c_str());
+    esp32OTA._descriptionOfFirmwareURL="/firmware/HW150BP14896/firmware.json"; //e.g. /my-fw-versions/firmware.json
+    #endif
+
+    esp32OTA._host="www.flipup.net"; //e.g. example.com
     //esp32OTA._certificate=test_root_ca;
     esp32OTA._firwmareVersion = cfginfo.asset.firmware;
     esp32OTA.clientForOta=clientForOta;
@@ -890,8 +1103,15 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
           }
           mqflipup.publish(fpPubTopic.c_str(),jsonmsg.c_str());
         #endif
-        display.scrollingText("F-otA-",2); // Upgrade Failed
-        display.print("UF"); // Upgrade Failed
+
+
+        #if defined (TM1637)
+          display.scrollingText("F-otA-",2); // Upgrade Failed
+          display.print("UF"); // Upgrade Failed
+        #elif defined(HT16K33)
+        #elif defined(LCD1602)
+        #endif
+
         esp32OTA.executeOTA_REBOOT();
     }else{
       doc["merchanttid"] = cfginfo.payboard.merchantid;
@@ -918,6 +1138,12 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     delay(1000);
   }else if(action == "firmware"){  
     display.scrollingText("S-FiE",2); // Accepted Config
+    #if defined (TM1637)
+      display.scrollingText("S-FiE",2); // Upgrade Failed
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
+
     doc.clear();
     doc["response"] = "firmware";
     doc["state"]="Firmware requested";
@@ -927,7 +1153,14 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     doc["desc"]="Current firmware version: " + cfginfo.asset.firmware;
   }else if(action == "setwifi"){
     // {"action":"setwifi","index":"1","ssid":"Home173-AIS","key":"1100110011","reconnect":"1"}
-    display.scrollingText("S-SSid",2);
+
+
+    #if defined (TM1637)
+      display.scrollingText("S-SSid",2); 
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
+
     String ssid = doc["ssid"].as<String>();
     String key = doc["key"].as<String>();
     int wifireconn = doc["reconnect"].as<int>();
@@ -951,8 +1184,14 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     wifimulti.addAP(ssid.c_str(),key.c_str());
     if(wifireconn){
       WiFi.disconnect();
-      display.print("nF");
-      digitalWrite(WIFI_LED,LOW);
+
+      #if defined (TM1637)
+        display.print("nF"); // Upgrade Failed
+      #elif defined(HT16K33)
+      #elif defined(LCD1602)
+      #endif
+
+      // digitalWrite(WIFI_LED,LOW);
       wifimulti.run();
       doc["state"]="Reconnected";
       doc["desc"]="setWiFi completed  and reconnected";
@@ -962,7 +1201,12 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     }
   
   }else if(action == "coinmodule"){
-    display.scrollingText("C-tPE",2);
+
+    #if defined (TM1637)
+      display.scrollingText("C-tPE",2); // Upgrade Failed
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
     cfginfo.asset.coinModule = (doc["coinmodule"].as<String>() == "single")?SINGLE:MULTI; //  SINGLE=0, MULTI=1
     (cfginfo.asset.coinModule == MULTI)?pricePerCoin=1:pricePerCoin=10;
 
@@ -975,8 +1219,12 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     (cfginfo.asset.coinModule == MULTI)?doc["desc"]="Change coinModule to: MULTI":doc["desc"]="Change coinModule to: SINGLE";
 
   }else if(action == "coinwaittimeout"){ // // {"action":"coinwaittimeout","coinwaittimeout":3}
-    display.scrollingText("C-Tout",2);
 
+    #if defined (TM1637)
+      display.scrollingText("S-Tout",2); // Upgrade Failed
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
     cfginfo.asset.coinwaittimeout = doc["coinwaittimeout"].as<float>();
     cfgdata.begin("config",false);
     cfgdata.putFloat("coinwaittimeout",cfginfo.asset.coinwaittimeout);
@@ -990,11 +1238,20 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     doc["desc"] = "Set CoinWaitTimeout: " + String(cfginfo.asset.coinwaittimeout);
 
   }else if(action == "orderid"){
-    display.scrollingText("A_oId",2);
+
+    #if defined (TM1637)
+      display.scrollingText("A-oId",2); // Upgrade Failed
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
   }else if(action == "assettype"){  
     // {"action":"assettype","assettype":"0"}
-    display.scrollingText("ASSt",2);
-    
+  
+    #if defined (TM1637)
+      display.scrollingText("A-ASSt",2); // Upgrade Failed
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
     cfginfo.asset.assettype = doc["assettype"].as<int>();
     cfgdata.begin("config",false);
     cfgdata.putInt("assettype",0);
@@ -1007,7 +1264,11 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     doc["state"]="Order changed"; 
     
   }else if(action == "payboard"){// To set payboard parameter
-    display.scrollingText("PbCFg",2);
+    #if defined (TM1637)
+      display.scrollingText("PbCFg",2); // Upgrade Failed
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
     String params = doc["params"];
     bool merchantflag = 0;
 
@@ -1079,31 +1340,56 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     }
     
   }else if(action == "backend"){
-    display.scrollingText("A_BECF",2);
+    #if defined (TM1637)
+      display.scrollingText("A-BECF",2); // Upgrade Failed
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
   }else if(action == "stateflag"){ //stateflag is flag for mark action before reboot  ex 1 is for reboot action, 2 for ota action
+    #if defined (TM1637)
+      display.scrollingText("S-SFlag",2); // Upgrade Failed
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
   }else if(action == "spin"){
-    bool machineStart = false;
-    digitalWrite(BOOK_LED,LOW);
-    display.scrollingText("SPIN",2);
-
-    #ifdef HW100BP10829
-    // buttonCtrl(0,1,1000);
-
+    // bool machineStart = false;
+    #ifdef USE_BOOKLED
+      digitalWrite(BOOK_LED,LOW);
     #endif
 
-    #ifdef HW100BP14826
-    BP14826 washer;
-    machineStart = washer.washProgram(washer.SPIN,0,0,0);
+    //******* v1.0.5 **********
+    // #ifdef USE_RGBLED  // look at startup.h
+    //   leds[0] = CRGB::Red;
+    //   FastLED.show();
+    // #endif
+
+    #if defined (TM1637)
+      display.scrollingText("A-SPIN",2); // Upgrade Failed
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
+
+    #ifdef HW100BP10829
+      //  washer.buttonCtrl(SPIN,1,1000);
+    #elif defined(HW100BP14826)
+      machineStart = washer.washProgram(washer.SPIN,0,0,0); // 7 mins
+    #elif defined(HW100BP14826ALLNEW)
+      machineStart = washer.washProgram(washer.SPIN,0,0,0); // 7 mins
+    #elif defined(HW150BP14896)
+      machineStart = washer.washProgram(washer.SPIN,0,0,0);
     #endif
 
     if(machineStart){  //unComment this row when production
+      //Set cfgstate
       cfgState = 5;
+      timeRemain = 8;
+
       cfgdata.begin("config",false);
         cfgdata.putInt("stateflag",cfgState);
         cfgdata.putInt("timeremain",timeRemain);
       cfgdata.end();
 
-      timeRemain = 7;
+      
       Serial.printf(" Program Time: %d\n",timeRemain);
       serviceTimeID=serviceTime.after((60*1000*timeRemain),serviceEnd);
       timeLeftID = timeLeft.every(60*1000*1,serviceLeft);
@@ -1111,36 +1397,59 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
 
       Serial.printf("stime:%d\n",stime[waitFlag-1]);
       Serial.printf("timeremain:%d\n",timeRemain);
-      Serial.printf("result:%d\n",(stime[waitFlag-1]-timeRemain));
-
+   
       doc.clear();
       doc["response"] = "spin";
       doc["merchantid"]=cfginfo.payboard.merchantid;
       doc["uuid"]=cfginfo.payboard.uuid;
       doc["state"]="SPIN Started";
       doc["desc"]="Manual run SPIN program";
+    }else{
+      cfgState = 6;
     }
   }else if(action == "rinsespin"){  
-    bool machineStart = false;
-    digitalWrite(BOOK_LED,LOW);
-    display.scrollingText("RAS",2);
-
-    #ifdef HW100BP10829
-    // buttonCtrl(0,1,1000);
+    // bool machineStart = false;
+    #ifdef USE_BOOKLED
+      digitalWrite(BOOK_LED,LOW);
     #endif
 
-    #ifdef HW100BP14826
-    BP14826 washer;
-    machineStart = washer.washProgram(washer.RINSESPIN,0,0,0);
+    //******* v1.0.5 **********
+    // #ifdef USE_RGBLED  // look at startup.h
+    //   leds[0] = CRGB::Red;
+    //   FastLED.show();
+    // #endif
+  
+    #if defined (TM1637)
+      display.scrollingText("RAS",2); // Upgrade Failed
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
+
+    #ifdef HW100BP10829
+      // buttonCtrl(0,1,1000);  //old version
+      // washer.buttonCtrl(0,1,1000);
+    #elif defined(HW100BP14826) || defined(HW100BP14826ALLNEW)
+      machineStart = washer.washProgram(washer.RINSESPIN,0,0,6); //Rinse about 26 mins
+    #elif defined(HW150BP14896)
+      machineStart = washer.washProgram(washer.SPORT,0,0,0);
     #endif
 
     if(machineStart){  //unComment this row when production
       cfgState = 5;
+
+      #ifdef HW100BP10829
+        timeRemain = 38;
+      #elif defined(HW100BP14826) || defined(HW100BP14826ALLNEW)
+        timeRemain = 28;
+      #elif defined(HW150BP14896)
+        timeRemain = 28;
+      #endif
+
       cfgdata.begin("config",false);
         cfgdata.putInt("stateflag",cfgState);
         cfgdata.putInt("timeremain",timeRemain);
       cfgdata.end();
-      timeRemain = 38;
+      
       Serial.printf(" Program Time: %d\n",timeRemain);
       serviceTimeID=serviceTime.after((60*1000*timeRemain),serviceEnd);
       timeLeftID = timeLeft.every(60*1000*1,serviceLeft);
@@ -1156,28 +1465,43 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
       doc["uuid"]=cfginfo.payboard.uuid;
       doc["state"]="RinseSpin Started";
       doc["desc"]="Manual run RinseSpin program";    
+    }else{
+      cfgState = 6;
     }
   }else if(action == "selfclean"){  
-    bool machineStart = false;
-    digitalWrite(BOOK_LED,LOW);
-    display.scrollingText("CLEAn",2);
+    // bool machineStart = false;
+    #ifdef USE_BOOKLED
+      digitalWrite(BOOK_LED,LOW);
+    #endif
+
+    //******* v1.0.5 **********
+    // #ifdef USE_RGBLED  // look at startup.h
+    //   leds[0] = CRGB::Red;
+    //   FastLED.show();
+    // #endif
+    
+    #if defined (TM1637)
+      display.scrollingText("CLEAn",2); // Upgrade Failed
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
 
     #ifdef HW100BP10829
     // buttonCtrl(0,1,1000);
-    #endif
-
-    #ifdef HW100BP14826
-    BP14826 washer;
-    machineStart = washer.washProgram(washer.SELFCLEAN,0,0,0);
+    #elif defined(HW100BP14826) || defined(HW100BP14826ALLNEW)
+      machineStart = washer.washProgram(washer.SELFCLEAN,0,0,0);
+    #elif defined(HW150BP14896)
+      machineStart = washer.washProgram(washer.CLEAN,0,0,0);
     #endif
 
     if(machineStart){  //unComment this row when production
       cfgState = 5;
+      timeRemain = 60;
       cfgdata.begin("config",false);
         cfgdata.putInt("stateflag",cfgState);
         cfgdata.putInt("timeremain",timeRemain);
       cfgdata.end();
-      timeRemain = 60;
+      
       Serial.printf(" Program Time: %d\n",timeRemain);
       serviceTimeID=serviceTime.after((60*1000*timeRemain),serviceEnd);
       timeLeftID = timeLeft.every(60*1000*1,serviceLeft);
@@ -1193,15 +1517,21 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
       doc["uuid"]=cfginfo.payboard.uuid;
       doc["state"]="SelfClean started";
       doc["desc"]="Manual run SelfClean program";    
+    }else{
+      cfgState=6;
     } 
   }else if(action == "startpause"){ 
-      // display.scrollingText("St-Pu",1);
-
-      #ifdef HW100BP10829
+      #ifdef TM1637
+        display.scrollingText("Pause",1);
+      #elif defined(HT16K33)
+      #elif defined(LCD1602)
       #endif
 
-      #ifdef HW100BP14826
-        BP14826 washer;
+      #ifdef HW100BP10829
+        // washer.buttonCtrl(washer.START,1,1000);
+      #elif defined(HW100BP14826) || defined(HW100BP14826ALLNEW)
+        washer.ctrlStart();
+      #elif defined(HW150BP14896)
         washer.ctrlStart();
       #endif
 
@@ -1216,63 +1546,115 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
       doc["desc"]="Manual StartPause machine.";
 
   }else if(action == "turnon"){  
-      display.scrollingText("t-on",2);
+  
+      #if defined (TM1637)
+        display.scrollingText("t-on",2);
+      #elif defined(HT16K33)
+      #elif defined(LCD1602)
+      #endif
+      #ifdef USE_BOOKLED
+        digitalWrite(BOOK_LED,LOW);
+      #endif
+
+      // #ifdef USE_RGBLED
+      //   leds[0] = CRGB::Red;
+      //   FastLED.show();
+      // #endif
 
       #ifdef HW100BP10829
-      buttonCtrl(0,1,1000);
+        washer.buttonCtrl(washer.POWER,1,1000);
+      #elif defined(HW100BP14826) || defined(HW100BP14826ALLNEW)
+        machineStart =  washer.ctrlPower(POWER_RLY,MACHINEDC,washer.TURNON);
+      #elif defined(HW150BP14896)
+        washer.ctrlPower(POWER_RLY,MACHINEDC,washer.TURNON);
       #endif
 
-      #ifdef HW100BP14826
-      BP14826 washer;
-      washer.ctrlPower(POWER_RLY,MACHINEDC,washer.TURNON);
-      #endif
+      Serial.println("Request to turn on machine, Turn on completed.");
+      if(machineStart){
+        cfgState = 5;
 
-      Serial.println("Manual request, Turn ON machine.");
+        doc.clear();
+        doc["response"] = "turnon";
+        doc["merchantid"]=cfginfo.payboard.merchantid;
+        doc["uuid"]=cfginfo.payboard.uuid;
+        doc["state"]="TurnON Completed";
+        doc["desc"]="Manual turn on machine.";
+      }else{
+        resetState();
+        doc.clear();
+        doc["response"] = "turnon";
+        doc["merchantid"]=cfginfo.payboard.merchantid;
+        doc["uuid"]=cfginfo.payboard.uuid;
+        doc["state"]="TurnON Failed";
+        doc["desc"]="Request turn on. But Machine not on.";
+      }
+      
 
-      resetState();
-      doc.clear();
-      doc["response"] = "turnon";
-      doc["merchantid"]=cfginfo.payboard.merchantid;
-      doc["uuid"]=cfginfo.payboard.uuid;
-      doc["state"]="TurnON Completed";
-      doc["desc"]="Manual turn on machine.";
 
   }else if(action == "turnoff"){  
-      display.scrollingText("t-oFF",2);
+      
+      #if defined (TM1637)
+        display.scrollingText("t-oFF",2);
+      #elif defined(HT16K33)
+      #elif defined(LCD1602)
+      #endif
+      #ifdef USE_BOOKLED
+        digitalWrite(BOOK_LED,HIGH);
+      #endif
+
+      #ifdef USE_RGBLED
+        leds[0] = CRGB::Green;
+        FastLED.show();
+      #endif
 
       #ifdef HW100BP10829
-      buttonCtrl(0,1,1000);
-      #endif
-
-      #ifdef HW100BP14826
-      BP14826 washer;
-      washer.ctrlPower(POWER_RLY,MACHINEDC,washer.TURNOFF);
+        washer.buttonCtrl(washer.POWER,1,1000); //POWER Button
+      #elif defined(HW100BP14826) || defined(HW100BP14826ALLNEW)
+        machineStart = washer.ctrlPower(POWER_RLY,MACHINEDC,washer.TURNOFF);
+      #elif defined(HW150BP14896)
+        washer.ctrlPower(POWER_RLY,MACHINEDC,washer.TURNOFF);
       #endif
       
-      Serial.println("Manual request, Turn OFF machine.");
+      Serial.println("Request to turn off machine, Turn OFF machine.");
+      if(machineStart){ // Now machine is off
+        resetState();
+        doc.clear();
+        doc["response"] = "turnoff";
+        doc["merchantid"]=cfginfo.payboard.merchantid;
+        doc["uuid"]=cfginfo.payboard.uuid;
+        doc["state"]="TurnOFF Completed";
+        doc["desc"]="Manual turn off completed.";
+      }else{ //Request turn off but not off.
+        cfgState = 5;
+        doc.clear();
+        doc["response"] = "turnoff";
+        doc["merchantid"]=cfginfo.payboard.merchantid;
+        doc["uuid"]=cfginfo.payboard.uuid;
+        doc["state"]="TurnOFF Failed";
+        doc["desc"]="Manual turn off failed" ;
+      }
 
-      resetState();
-      doc.clear();
-      doc["response"] = "turnoff";
-      doc["merchantid"]=cfginfo.payboard.merchantid;
-      doc["uuid"]=cfginfo.payboard.uuid;
-      doc["state"]="TurnOFF Completed";
-      doc["desc"]="Manual turn off machine.";
+
 
   }else if(action == "jobcancel"){
-    display.scrollingText("J-CAn",2);
+  
+    #if defined (TM1637)
+      display.scrollingText("J-CAn",2);
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
+
         //Check timeRemain equal or less than 1. Then allow to cancel job completely.    
     if((stime[waitFlag-1]-timeRemain)<=5){
       //Turn off machine.
       #ifdef HW100BP10829
-      buttonCtrl(0,1,1000);
-      #endif
-
-      #ifdef HW100BP14826
-      BP14826 washer;
-      
-      washer.ctrlStart();
-      washer.ctrlPower(POWER_RLY,MACHINEDC,washer.TURNOFF);
+        washer.buttonCtrl(washer.POWER,1,1000);
+      #elif defined(HW100BP14826) || defined(HW100BP14826ALLNEW)      
+        washer.ctrlStart();
+        washer.ctrlPower(POWER_RLY,MACHINEDC,washer.TURNOFF);
+      #elif defined(HW150BP14896)
+        washer.ctrlStart();
+        washer.ctrlPower(POWER_RLY,MACHINEDC,washer.TURNOFF);
       #endif
 
       Serial.printf("stime:%d\n",stime[waitFlag-1]);
@@ -1282,6 +1664,7 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
       Serial.println("Turn off machine from job cancelation.");
 
       serviceEnd();
+      resetState(); //Add 2 Nov 24
       doc.clear();
       doc["response"] = "jobcancel";
       doc["merchantid"]=cfginfo.payboard.merchantid;
@@ -1301,32 +1684,39 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     }
     delay(5000);
   }else if(action == "resetstate"){
+      // Reset serviceTimeID
+      serviceTime.stop(serviceTimeID); //Stop main timer
+      timeLeft.stop(timeLeftID);  //Stop update every minute
+      progTimer.stop(progTimerID);
 
       #ifdef HW100BP10829
-      buttonCtrl(0,1,1000);
-      #endif
-
-      #ifdef HW100BP14826
-      BP14826 washer;
-      washer.ctrlPower(POWER_RLY,MACHINEDC,washer.TURNOFF);
+        washer.buttonCtrl(washer.POWER,1,1000);
+      #elif defined(HW100BP14826) || defined(HW100BP14826ALLNEW)
+        washer.ctrlReset();
+      #elif defined(HW150BP14896)
+        washer.ctrlCancel(); // Make sure ctrlCancel same as 14826
       #endif
       
-      Serial.printf("stime:%d\n",stime[waitFlag-1]);
-      Serial.printf("timeremain:%d\n",timeRemain);
-      Serial.printf("result:%d\n",(stime[waitFlag-1]-timeRemain));
+      Serial.printf("[ResetState]->stime:%d\n",stime[waitFlag-1]);
+      Serial.printf("[ResetState]->timeremain:%d\n",timeRemain);
+      Serial.printf("[ResetState]->result:%d\n",(stime[waitFlag-1]-timeRemain));
+      Serial.println("[ResetState]->, Clear time remain");
 
-      Serial.println("Reset State. , Clear time remain");
 
       resetState();
       doc.clear();
       doc["response"] = "resetstate";
       doc["merchantid"]=cfginfo.payboard.merchantid;
       doc["uuid"]=cfginfo.payboard.uuid;
-      doc["state"]="Resetstate executed";
+      doc["state"]="Resetstate completed";
       doc["desc"]="Reset state";
 
   }else if(action == "jobcreate"){
-    display.scrollingText("J-Add",2);
+    #if defined (TM1637)
+      display.scrollingText("J-Add",2);
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
     coinValue = doc["price"].as<int>();
     paymentby = doc["paymentby"].as<int>();  //1 = coin , 2 = qr, 3 = kiosk , 4 = free
 
@@ -1348,11 +1738,13 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     doc["state"]="Job created";
     doc["desc"]="Manual create job.";
 
-    display.scrollingText("J-Add",1);
-    delay(3000);
   }else if(action == "nvsdelete"){
-    String msg;
-    display.scrollingText("n-dEL",2);   
+    String msg;  
+    #if defined (TM1637)
+      display.scrollingText("n-dEL",2);
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
     Serial.printf("NVS size before delete: %d\n",cfgdata.freeEntries());
     nvs_flash_erase(); // erase the NVS partition and...
     nvs_flash_init(); // initialize the NVS partition.
@@ -1374,17 +1766,21 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     ESP.restart();
   }else if(action == "selftest"){
     String msg;
-    display.scrollingText("tESt",2);
+  
+    #if defined (TM1637)
+      display.scrollingText("tEST",2);
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
     msg = "Machine Selftest finished";
     Serial.printf("%s\n",msg.c_str());
 
     #ifdef HW100BP10829
-    selftest(AD0,AD1,AD2,CTRLPULSE);
-    #endif
-
-    #ifdef HW100BP14826
-    BP14826 washer;
-    washer.washProgram(washer.QUICK,0,0,0);
+      washer.selftest(AD0,AD1,AD2,CTRLPULSE);
+    #elif defined(HW100BP14826) || defined(HW100BP14826ALLNEW)
+      washer.washProgram(washer.QUICK,0,0,0); // 15 mins
+    #elif defined(HW150BP14896)
+      washer.washProgram(washer.SPORT,0,0,0); // 31 mins
     #endif
 
     doc.clear();
@@ -1394,7 +1790,11 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     doc["state"]="NV-RAM deleted";
     doc["desc"]=msg;    
   }else if(action == "offline"){
-  display.scrollingText("OFFLinE",2);
+    #if defined (TM1637)
+      display.scrollingText("OFFLinE",2);
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
     digitalWrite(ENCOIN,LOW); // ENCoin off
     cfgState = 10;// CFGState 10 offline
     timeRemain = 0;
@@ -1412,7 +1812,12 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     doc["desc"]="Asset is in OFFLINE mode";    
 
   }else if(action == "online"){
-    display.scrollingText("A_OnLInE",2);
+
+    #if defined (TM1637)
+      display.scrollingText("OnLinE",2);
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
     resetState();
 
     doc.clear();
@@ -1422,8 +1827,12 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     doc["state"]="Device set to online mode.";
     doc["desc"]="Asset is in ONLINE mode";       
   }else if(action == "setntp"){ // {"action":"setntp","ntpinx":1,"ntpserver":"xxx.xxx.xxx.xxx"}
-    display.scrollingText("SetntP",2);
-
+    
+    #if defined (TM1637)
+      display.scrollingText("S-ntP",2);
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
     int ntpInx = doc["ntpinx"].as<int>();
     String ntpValue = doc["value"].as<String>();
 
@@ -1520,7 +1929,7 @@ void pbBackendMqtt(){
     pbSubTopic = "payboard/" + String(cfginfo.payboard.merchantid) + "/" + String(cfginfo.payboard.uuid);
   
     
-    Serial.printf(" Primary Mqtt connecting ...");
+    Serial.printf("Primary Mqtt connecting ...");
 
     while(!mqclient.connected() && (mqttRetry <= mqttRetryLimit)){
       mqclient.connect(cfginfo.deviceid.c_str(),cfginfo.payboard.mqttuser.c_str(), cfginfo.payboard.mqttpass.c_str());
@@ -1542,7 +1951,16 @@ void pbBackendMqtt(){
   }        
 
   if(mqclient.connected()){
-    digitalWrite(BOOK_LED,HIGH);
+    #ifdef USE_BOOKLED
+      digitalWrite(BOOK_LED,HIGH);
+    #endif
+
+    //******* v1.0.5 **********
+    #ifdef USE_RGBLED  // look at startup.h
+      leds[0] = CRGB::Green;
+      FastLED.show();
+    #endif
+    Serial.println();
     Serial.printf("Mqtt connected\n");
     mqclient.subscribe(pbSubTopic.c_str());
     Serial.printf("   Subscribe Topic: %s\n",pbSubTopic.c_str());
@@ -1612,6 +2030,58 @@ void showPrice(SevenSegmentTM1637 &disp,int &count,byte max, byte min){
 }
 
 
+void progDrain(){   // Add 21 Nov 24
+  //Step 1: Cancel existing wash program
+  washer.ctrlCancel();
+  // washer.ctrlPower(POWER_RLY,MACHINEDC,washer.TURNOFF);
+  //Step 2: Start Drain detrgent water 1 mins
+  machineStart = washer.washProgram(washer.SPIN,0,0,0);
+  //Step 3: Start full rinse and spin
+  if(machineStart){
+    progTimer2ID = progTimer2.after(60*1000*drainTime,progRinseSpin);
+  }
+}
+
+void progRinseSpin(){
+  //Step 1: Cancel existing wash program
+  washer.ctrlCancel();
+
+  #ifdef HW100BP10829
+  #elif defined(HW100BP14826) || defined(HW100BP14826ALLNEW)
+    //Step 2: Start RinseSpin program for 26 mins
+    int rinsePress=0;
+    switch(rinseCount){
+      case 0: 
+        rinsePress = 4;
+        break;
+      case 1:
+        rinsePress = 5;
+        break;
+      case 2:
+        rinsePress = 6;
+        break;
+      case 3:
+        rinsePress = 0;
+        break;
+      case 4:
+        rinsePress = 2;
+        break;
+      case 5:
+        rinsePress = 3;
+        break;                
+    }
+    machineStart = washer.washProgram(washer.RINSESPIN,0,0,rinsePress);
+  #elif defined(HW150BP14896)
+    //Step 2: Start RinseSpin program for 26 mins
+    
+  #endif
+}
+
+
+
+
+
+
 
 
 void progStart(){
@@ -1619,37 +2089,77 @@ void progStart(){
   payboard backend;
   String response;
   int rescode;
-  bool machineStart = false;
+  // bool machineStart = false;
+  
   
   digitalWrite(ENCOIN,LOW); // Disable Coin Module
+
+  #ifdef USE_BOOKLED
+    digitalWrite(BOOK_LED,LOW);
+  #endif
 
   //This select program base on coinValue 
   #ifdef HW100BP10829
   switch(waitFlag){
     case 1:
-      machineStart = startProg(11);
+      machineStart = washer.startProg(11); 
       break;
     case 2:
-      machineStart = startProg(12);
+      machineStart = washer.startProg(12);
       break;
     case 3:
-      machineStart = startProg(3);
+      machineStart = washer.startProg(3);
       break;
   }
-  #endif
-
-
-  #ifdef HW100BP14826
-    BP14826 washer;
+  #elif defined(HW100BP14826) || defined(HW100BP14826ALLNEW)
     switch(waitFlag){
-      case 1: //Price 1 35mins
-        machineStart = washer.washProgram(washer.QUICK,3,0,2);
+      case 1: //Price 1 37mins  
+        //Run wash program for 10 mins then RinseSpin 26 mins
+        // machineStart = washer.washProgram(washer.QUICK,3,0,2);  //v1.0.8
+        machineStart = washer.washProgram(washer.MIX,0,0,0);  // v1.0.9  ซักเต็ม 10kg 
+
+        //New progRinseSpin 20Nov24 
+        if(machineStart){
+          Serial.println("Run Program wash and progDrain");
+          drainTime = 3;
+          washTime = 8;
+          rinseCount = 2; //Set RinseSpin Program 2 Times
+          progTimerID = progTimer.after(60*1000*washTime,progDrain); // 37 mins---8 mins + 3min Spin  + 26 RinseSpin total 35mins
+        }
+        //End progRenseSPIN --------------------
+
         break;
       case 2: //Price 2 60 mins
-        machineStart = washer.washProgram(washer.MIX,2,0,6);
+        // machineStart = washer.washProgram(washer.DISINFECTION,2,0,0);
+        machineStart = washer.washProgram(washer.MIX,2,0,6);  //New MIX 10kg Load (temp 40, speed 1000 ,Rinse 1)
+        // machineStart = washer.washProgram(washer.SHIRT,1,0,6);  //Previous use SHIRT (SKYVIEW)
+        //New progRinseSpin 20Nov24
+        if(machineStart){
+          Serial.println("Set timer: progRinseSpin");
+          drainTime = 3;
+          washTime = 30;
+          rinseCount = 2;  // Set RinseSpin Program 2 Times
+          progTimerID = progTimer.after(60*1000*washTime,progDrain); // 60 (30 + 4 + 26)
+
+          // progTimerID = progTimer.after(60*1000*25,progRinseSpin); //25 mins + 26 RinseSpin
+        }
+        //End progRenseSPIN --------------------
         break;
-      case 3: //Price 3  90 min6
-        machineStart = washer.washProgram(washer.MIX,3,0,6);
+      case 3: //Price 3  90 mins
+        machineStart = washer.washProgram(washer.MIX,3,0,6);  //New MIX 10kg LOAD
+        // machineStart = washer.washProgram(washer.SHIRT,3,0,6);  //Previous use SHIRT
+        break;
+    }
+  #elif defined(HW150BP14896)
+    switch(waitFlag){
+      case 1: // Price 1 for 30mins
+        machineStart = washer.washProgram(washer.SPORT,2,1,0);  //36Mins
+        break;
+      case 2: // Price 2 for 60mins
+        machineStart = washer.washProgram(washer.MIX,1,0,0); // about 1:07hrs
+        break;
+      case 3: // Price 3 for 90mins
+        machineStart = washer.washProgram(washer.MIX,3,0,2); // about 1:30 hrs
         break;
     }
   #endif
@@ -1673,9 +2183,18 @@ void progStart(){
         Serial.println(twifi);
       }
 
-      display.print("nF");
+      #if defined (TM1637)
+         display.print("nF");
+      #elif defined(HT16K33)
+      #elif defined(LCD1602)
+      #endif
+
+      #ifdef USE_RGBLED
+
+      #endif
+
       //WebSerial.println("[nF]->WiFi Connected");
-      digitalWrite(WIFI_LED,LOW);
+      // digitalWrite(WIFI_LED,LOW);
       wifimulti.run();
 
       uint32_t tdiff = millis() - twifi;
@@ -1684,7 +2203,11 @@ void progStart(){
 
       if( tdiff > 60*1000*wifitimeout ){
         Serial.println("Rebooting ESP due wifi not connect");
-        display.print("WrSt");
+        #if defined (TM1637)
+          display.print("WrSt");
+        #elif defined(HT16K33)
+        #elif defined(LCD1602)
+        #endif
         delay(2000);
         ESP.restart();
       }
@@ -1701,6 +2224,25 @@ void progStart(){
           Serial.printf("Response code: %d\n",rescode);
           Serial.printf("Response trans: %s\n",response.c_str());
         }
+
+        //new Cash transaction to shadowPayboard API
+        #ifdef SHADOWPAYBOARD
+          shadowPbCoinTrans.uri_countCoin = cfginfo.backend.apihost+"/api/transaction/new";
+          if(cfgState == 4){
+            rescode = shadowPbCoinTrans.coinCounter(cfginfo.payboard.uuid.c_str(),coinValue,"paid","cash",response);
+          }else if(cfgState == 5){
+
+          }
+
+          if(rescode == 200){
+            Serial.printf("[ProgStart] Shadow-Payboard response trans: %s\n",response.c_str());
+            cfgdata.putString("orderid",response); //Save Order id
+          }else{
+            Serial.printf("[ProgStart] Shadow-Payboard response code: %d\n",rescode);
+            Serial.printf("[ProgStart] Shadow-Payboard response trans: %s\n",response.c_str());
+          }
+        #endif
+
         break;
       case 2:// by QR
         cfgdata.putString("orderid",cfginfo.asset.orderid);
@@ -1722,33 +2264,45 @@ void progStart(){
     }
     cfgdata.end();
 
+    //Set timer for wash program ตามโปรแกรมที่ได้เลือกไว้ ในขั้นตอนการหยอดเหรียญ coinValue
     Serial.printf(" Program Time: %d\n",timeRemain);
-    serviceTimeID=serviceTime.after((60*1000*timeRemain),serviceEnd);
-    timeLeftID = timeLeft.every(60*1000*1,serviceLeft);
     Serial.printf("On service washing for %d minutes\n",timeRemain);
+    serviceTimeID=serviceTime.after((60*1000*timeRemain),serviceEnd);  //Timer for whole process
+    timeLeftID = timeLeft.every(60*1000*1,serviceLeft); //Timer for update every minute
+    disptxt = "";
+    disptxt = "Job started.";
+
+    mqttStateUpdate();
+
   }else{
     coin=0;
     coinValue=0;
     cfgState = 6;
-    display.print("E4");
+    #if defined (TM1637)
+        display.print("JF");
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)
+    #endif
     Serial.printf("Failed to start job.\n");
-    // resetState();
   }
 }
 
 
 
 void serviceLeft(){
+  Serial.println("[serviceLeft]->Executing");
   if(timeRemain > 0){
-    Serial.printf("Service Time remain: %d\n",--timeRemain);
+    // if(timeRemain > 0){
+    timeRemain = timeRemain - 1;
+    Serial.printf("Service Time remain: %d\n",timeRemain);
     cfgdata.begin("config",false);
     cfgdata.putInt("timeremain",timeRemain);
     cfgdata.end();
+    // }
+  }else{
+    timeRemain = 0;
+    Serial.printf("TimeRemain is 0. But Job not finish yet.");
   }
-  // Serial.printf("Service Time remain: %d\n",--timeRemain);
-  // cfgdata.begin("config",false);
-  // cfgdata.putInt("timeremain",timeRemain);
-  // cfgdata.end();
   mqttStateUpdate();
 }
 
@@ -1758,12 +2312,11 @@ void serviceEnd(){
   payboard backend;
   String response;
   int rescode;
-  BP14826 washer;
 
   timeLeft.stop(timeLeftID);
+  
 
-  // Check DoorLock Here
-
+  // Check Machine finish job by door unlock
   #ifdef TAWEE
   //This if PROG1 for K.Tawee shop (no doorlock)
   if( digitalRead(PROG1) ){ // digitalRead(PROG1) if get  0 = machine still running.
@@ -1774,8 +2327,19 @@ void serviceEnd(){
   #endif
 
   #ifdef HW100BP14826
-  if(!washer.isDoorLock(DLOCK)){
+    //During Ending LED on machine turn off before door unlock.
+  if(!washer.isDoorLock(DLOCK)){  //Machine unlock door when finish.
   #endif
+
+  #ifdef HW100BP14826ALLNEW
+    //During Ending LED on machine turn off before door unlock.
+    if(!washer.isDoorLock(DLOCK)){
+  #endif
+
+  #ifdef HW150BP14896
+  if(!washer.isDoorLock(DLOCK) || (!washer.isMachineON(MACHINEDC))){
+  #endif
+
     coin=0;
     timeRemain = 0;
     coinValue = 0;
@@ -1794,14 +2358,14 @@ void serviceEnd(){
     backend.merchantKEY=cfginfo.payboard.merchantkey;
     backend.appkey=cfginfo.payboard.apikey;
 
-
+    //Prepare notify to backend
     switch(paymentby){
       case 1: // by  Coin
         Serial.printf("Coin Job Finished.\n");
         break;
       case 2: // by QR
         Serial.printf("Sending QR acknoloedge to backend\n");
-        cfgdata.putString("orderid",cfginfo.asset.orderid);
+
         backend.uri_deviceStart = cfginfo.payboard.apihost + "/v1.0/device/stop";
         rescode = backend.deviceStart(cfginfo.asset.orderid.c_str(),response);
 
@@ -1820,21 +2384,30 @@ void serviceEnd(){
         Serial.printf("Free Job finished\n");
         break;
     }
-
+  
+    //Power off machine
     Serial.printf("Job Finish.  Poweroff machine soon.\n");
-    washer.ctrlPower(POWER_RLY,MACHINEDC,washer.TURNOFF);
-    digitalWrite(BOOK_LED,HIGH);
+    washer.ctrlPower(POWER_RLY,MACHINEDC,washer.TURNOFF);    //Press on power button.
+    #ifdef USE_BOOKLED
+      digitalWrite(BOOK_LED,HIGH);
+    #endif
+
+    //******* v1.0.5 **********
+    #ifdef USE_RGBLED  // look at startup.h
+      leds[0] = CRGB::Green;
+      FastLED.show();
+    #endif
     mqttStateUpdate();
-  }else{
+  }else{ // Door is lock -- machine not finish job yet then wait for one more minute
+
     Serial.printf("Job still running. wait for one more minute\n");
-    //serviceTime.stop(serviceTimeID);
-    serviceTimeID=serviceTime.after((60*1000*1),serviceEnd);
-    timeLeftID = timeLeft.every(60*1000*1,serviceLeft);     
+    disptxt="Wait one more minute for machine finish.";
+
+    timeRemain = 1;
+    serviceTimeID=serviceTime.after((60*1000*timeRemain),serviceEnd);
+    timeLeftID = timeLeft.every(60*1000*timeRemain,serviceLeft);  // Add on 23 Mar 25
   }
-
 }
-
-
 
 void resetState()
 {
@@ -1862,8 +2435,11 @@ void resetState()
   cfgdata.putInt("timeremain",0);
   cfgdata.end();
 
-  
-  display.print("StC");
+  #if defined (TM1637)
+      display.print("Rt");
+  #elif defined(HT16K33)
+  #elif defined(LCD1602)
+  #endif
   delay(2000);
 }
 
@@ -1874,17 +2450,32 @@ void setup(){
   Serial.begin(115200);
     //*** initial 7Segment Display
 
-  /* for 4 Digits */
-  display.begin(4,0);
-  display.setCursor(0,1);
+  #if defined (TM1637)
+        /* for 4 Digits */
+    display.begin(4,0);
+    display.setCursor(0,1);
 
-  /* for 2 Digits */
-  //display.begin();
-  display.setBacklight(30);
-  display.print("St"); //Setup
+    /* for 2 Digits */
+    //display.begin();
+    display.setBacklight(30);
+    display.print("St"); //Setup
+  #elif defined(HT16K33)
+  #elif defined(LCD1602)
+  #endif
+
   delay(200);
 
-  digitalWrite(BOOK_LED,LOW);
+  #ifdef USE_BOOKLED   //in startup.h
+    digitalWrite(BOOK_LED,LOW);
+  #endif
+
+  #ifdef USE_RGBLED   //in startup.h
+    FastLED.addLeds<SK6812, RGB_LED, RGB>(leds, NUM_LEDS);
+    FastLED.setBrightness(80);
+
+    leds[0] = CRGB::Black;
+    FastLED.show();
+  #endif
 
   Serial.println("**************** Setup Device ****************");
 
@@ -1898,6 +2489,12 @@ void setup(){
   // Serial.begin(115200); 
   Serial.println();
   Serial.println("Setting up device...");
+  
+  #ifdef USE_RGBLED
+    //When setup wifi and mqtt not connect yet. Then set RGB to Magenta
+    leds[0] = CRGB::Magenta;
+    FastLED.show();
+  #endif
 
   //************************* v1.0.6  Delete NV ? *****************************
   Serial.printf("\n\nDelete NV-RAM data?  y/Y to delete or any to continue.\n");
@@ -1932,24 +2529,18 @@ void setup(){
   Serial.printf("\n************** Setting up this device **************\n");
 
  
-  //*** Initial GPIO
+ //******* Initial GPIO
+  initGPIO(INPUT_SET,OUTPUT_SET);
 
-    //** Initial INPUT  PIN
-  io_config.pin_bit_mask = INPUT_SET;  
-  io_config.intr_type = GPIO_INTR_DISABLE;
-  io_config.mode = GPIO_MODE_INPUT;
-  io_config.pull_up_en = GPIO_PULLUP_ENABLE;
-  gpio_config(&io_config);
 
-  //** Initial OUTPUT PIN
-  io_config.pin_bit_mask = OUTPUT_SET;
-  io_config.intr_type = GPIO_INTR_DISABLE;
-  io_config.mode = GPIO_MODE_INPUT_OUTPUT;
-  gpio_config(&io_config);
-
-  
   //*** Intial Interrupt
-  interrupt();
+  // #define COINISR
+  #ifdef COINISR
+    pinMode(COININ, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(COININ), coinISR, FALLING);     
+  #else
+    init_interrupt();
+  #endif
 
   // This while for reading door lock only
   // while(1){
@@ -1958,7 +2549,13 @@ void setup(){
   // }
   
   //Get WiFi Configuration
-  display.print("Cn"); //Config Network
+  
+  #if defined(TM1637)
+    display.print("Cn"); //Config Network
+  #elif defined(HT16K33)
+  #elif defined(LCD1602)
+  #endif
+  
   delay(200);
   Serial.printf("WiFi Connecting.....\n");
 
@@ -1967,8 +2564,11 @@ void setup(){
   //wifimulti.addAP("OYO Happylandn guest","12345678");
   //wifimulti.addAP("Home173-AIS","1100110011");
   //wifimulti.addAP("WashcoinRGH18","1100110011");
+  wifimulti.addAP("RGH18","1100110011");
+  wifimulti.addAP("washpoiint","1100110011");
   wifimulti.addAP("myWiFi","1100110011");
-  wifimulti.addAP("Home173-AIS","1100110011");
+  wifimulti.addAP("alvaWiFi","1100110011");
+  // wifimulti.addAP("RGH18","1100110011");
   //wifimulti.addAP("WashCoin","p@ssw0rd456$");
 
   for(int i=0;i<loadWIFICFG(cfgdata,cfginfo);i++){
@@ -1977,44 +2577,56 @@ void setup(){
   }
 
 
-  Serial.printf("WiFi connecting...\n"); 
-  wtime=0;
-  while ( (WiFi.status() != WL_CONNECTED) && (wtime < 100)) {  
-    #if defined(TM1637)
-      display.scrollingText("-nF-",1);
-      display.print("nF");    
-    #elif defined(HT16K33)
-    #elif defined(LCD1602)
-      lcdText(0,0,"WiFi Connecting",300);
-    #endif  
+  connectToWiFi(wifimulti, 10, true); //For testing
 
-    wifimulti.run();
-    Serial.print(".");
-    wtime++;
-    delay(500);
-  }
+  /*  This comment for testing */
+  // Serial.printf("Setup->WiFi connecting...\n"); 
+  // wtime=0;
+  // while ( (WiFi.status() != WL_CONNECTED) && (wtime < 100)) {  
+  //   #if defined(TM1637)
+  //     display.scrollingText("nF",2);
+  //     // display.print("nF");    
+  //   #elif defined(HT16K33)
+  //   #elif defined(LCD1602)
+  //     lcdText(0,0,"WiFi Connecting",300);
+  //   #endif  
 
-  if(wtime > 100){
-    Serial.printf("WiFi connecting timeout....Restarting device. \n");
-    #if defined(TM1637)
-      display.scrollingText("Reset",2);
-    #elif defined(HT16K33)
-    #elif defined(LCD1602)
-      lcdText(0,2,"Reset Device",1000);
-    #endif      
-    delay(1000);
-    ESP.restart();
-  }
+  //   wifimulti.run();
+  //   Serial.print(".");
+  //   wtime++;
+  //   delay(500);
+  // }
 
-  blinkGPIO(WIFI_LED,400);
+  // if(wtime > 100){
+  //   Serial.printf("WiFi connecting timeout....Restarting device. \n");
+  //   #if defined(TM1637)
+  //     display.scrollingText("F-RSt",2);
+  //   #elif defined(HT16K33)
+  //   #elif defined(LCD1602)
+  //     lcdText(0,2,"Reset Device",1000);
+  //   #endif      
+  //   delay(1000);
+  //   ESP.restart();
+  // }
+  /*  This comment for testing */
+
+
+
+
+  // blinkGPIO(WIFI_LED,400);
   Serial.printf("WiFi Connected...");
   //WebSerial.begin(&server);
   //WebSerial.msgCallback(recvMsg);
   WiFiinfo();
   
-  display.print("LC"); //Load Config
-  delay(200);
-  Serial.printf("Load default configuration.\n");
+  #if defined(TM1637)
+    display.print("LC"); //Load Config
+    delay(200);
+  #elif defined(HT16K33)
+  #elif defined(LCD1602)  
+  #endif
+
+  Serial.printf("Loading the configuration.\n");
   initCFG(cfginfo); 
 
   cfginfo.deviceid = getdeviceid();
@@ -2143,8 +2755,13 @@ void setup(){
     cfginfo.payboard.uuid = cfgdata.getString("uuid","").c_str();
   }else{//Device not register
     Serial.printf("Device not register\n");
-    display.print("df"); // Device Failed
-    delay(200);
+
+    #if defined (TM1637)
+      display.print("df"); // Device Failed
+      delay(200);
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)  
+    #endif
     Serial.println(cfginfo.asset.mac);
     payboard backend;
     backend.uri_register = cfginfo.payboard.apihost + "/v1.0/device/register";
@@ -2175,15 +2792,20 @@ void setup(){
 
   //Keep WiFi connection
   while (!WiFi.isConnected()) { 
+    Serial.println("Reconnecting WiFi...");
     if(twifi == 0){
       twifi = millis();
       Serial.print("TWifi:");
       Serial.println(twifi);
     }
 
-    display.print("nF");
+    #if defined(TM1637)
+      display.print("nF");
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)      
+    #endif
     //WebSerial.println("[nF]->WiFi Connected");
-    digitalWrite(WIFI_LED,LOW);
+    // digitalWrite(WIFI_LED,LOW);
     wifimulti.run();
 
     uint32_t tdiff = millis() - twifi;
@@ -2199,10 +2821,14 @@ void setup(){
   }
 
   if(WiFi.isConnected()){
-    blinkGPIO(WIFI_LED,400); 
+    // blinkGPIO(WIFI_LED,400); 
 
     //**** Connecting  MQTT
-    display.print("HF"); // Host Failed
+    #if defined(TM1637)
+      display.print("HF"); // Host Failed
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)        
+    #endif
     delay(200);
     pbBackendMqtt();
     
@@ -2212,7 +2838,11 @@ void setup(){
 
   
     //*** Set NTP
-    display.print("tF"); //Time Failed
+    #if defined(TM1637)
+      display.print("tF"); //Time Failed
+    #elif defined(HT16K33)
+    #elif defined(LCD1602)  
+    #endif
     delay(200);
     Serial.printf("\nConnecting to TimeServer --> ");
     configTime(6*3600,3600,cfginfo.asset.ntpServer1.c_str(),cfginfo.asset.ntpServer2.c_str());
@@ -2228,8 +2858,13 @@ void setup(){
   }
 
   //******  Check stateflag 
-  display.print("SF"); //StateFlag
-  delay(200);
+  #if defined(TM1637)
+    display.print("SF"); //StateFlag
+    delay(200);
+  #elif defined(HT16K33)
+  #elif defined(LCD1602)  
+  #endif
+  
   cfgdata.begin("config",false);
   if(cfgdata.isKey("stateflag")){
     stateflag = cfgdata.getInt("stateflag",0);
@@ -2238,10 +2873,29 @@ void setup(){
     StaticJsonDocument<100> doc;
 
     switch(stateflag){
-      case 1:
-          display.scrollingText("Fi-RSt",2);
-          Serial.printf("Before reboot stateflag: %d\n",stateflag);
+      case 1: //Action after reboot
+          timeRemain = cfgdata.getInt("timeremain",0);
+          #if defined(TM1637)
+            display.scrollingText("Fi-RSt",2);
+          #elif defined(HT16K33)
+          #elif defined(LCD1602)        
+          #endif
+          Serial.printf("Before reboot timeRemain is : %d\n",stateflag);
 
+          if(timeRemain > 0){
+            cfgState = 5;
+            stateflag = cfgState;
+          }else{
+            stateflag = 0;
+            cfgState = 3;
+          }
+          cfgdata.putInt("stateflag",stateflag);
+
+          Serial.printf("After reboot stateflag: %d\n",stateflag);
+          Serial.printf("After reboot cfgState: %d\n",cfgState);
+          Serial.printf("After reboot TimeRemain: %d\n",timeRemain);
+
+          
           doc["response"]="reboot";
           doc["merchantid"]=cfginfo.payboard.merchantid;
           doc["uuid"]=cfginfo.payboard.uuid;
@@ -2262,14 +2916,13 @@ void setup(){
               mqflipup.publish(fpPubTopic.c_str(),jsonmsg.c_str());
             }
           #endif
-
-          cfgdata.putInt("stateflag",0);
-          stateflag = 0;
-          Serial.printf("After reboot stateflag: %d\n",stateflag);
-          cfgState = 3;     
         break;
-      case 2:
+      case 2: // Action after OTA done
+          #if defined(TM1637)
           display.scrollingText("Fi-OtA",2);
+          #elif defined(HT16K33)
+          #elif defined(LCD1602)  
+          #endif
           Serial.printf("Before OTA stateflag: %d\n",stateflag);
           doc["response"]="ota";
           doc["merchantid"]=cfginfo.payboard.merchantid;
@@ -2299,8 +2952,12 @@ void setup(){
           Serial.printf("After OTA stateflag: %d\n",stateflag);
           cfgState=3;    
         break;
-      case 3:
+      case 3: //Action after NVSdelete
+          #if defined(TM1637)
           display.scrollingText("Fi-n-dEL",2);
+          #elif defined(HT16K33)
+          #elif defined(LCD1602)  
+          #endif
           doc["response"]="nvsdelete";
           doc["merchantid"]=cfginfo.payboard.merchantid;
           doc["uuid"]=cfginfo.payboard.uuid;
@@ -2328,8 +2985,12 @@ void setup(){
           Serial.printf("stateflag after: %d\n",stateflag);
           cfgState=3;      
         break;
-      case 4:
+      case 4: //Action after mac address change
+          #if defined(TM1637)
           display.scrollingText("Fi-SEt-Addr",2);
+          #elif defined(HT16K33)
+          #elif defined(LCD1602)  
+          #endif
           doc["response"]="setmac";
           doc["merchantid"]=cfginfo.payboard.merchantid;
           doc["uuid"]=cfginfo.payboard.uuid;
@@ -2357,10 +3018,14 @@ void setup(){
           Serial.printf("stateflag after: %d\n",stateflag);
           cfgState = 3;
         break;   
-      case 5:
+      case 5: // Action when found job not yet finish.
+          #if defined(TM1637)
           display.scrollingText("J-Cont",2);
+          #elif defined(HT16K33)
+          #elif defined(LCD1602)      
+          #endif
           Serial.printf("Before resume stateflag: %d\n",stateflag);
-          display.print("PF"); //Power Outage Event
+          
           delay(200);
           cfgState = stateflag;
           dispflag = 1;
@@ -2376,7 +3041,16 @@ void setup(){
           // end edit V1.0.3
           //if(isHome(PROG1)){ //Machine on service
             Serial.printf("Resuming job for orderID: %s\n",cfginfo.asset.orderid.c_str());
+            #if defined(TM1673)
             display.print("ARJ"); // Automatic Resume Job
+            #endif
+            #ifdef USE_BOOKLED
+              digitalWrite(BOOK_LED,LOW);
+            #endif
+
+            #ifdef USE_RGBLED
+            #endif
+
             delay(2000);
             serviceTimeID = serviceTime.after(60*1000*timeRemain,serviceEnd);
             timeLeftID = timeLeft.every(60*1000*1,serviceLeft);
@@ -2388,8 +3062,12 @@ void setup(){
             timeRemain = 0;
 
             Serial.printf("Automatic cancel not job.\n");
+            #if defined(TM1637)
             display.print("ACJ"); //Automatic Cancel Job
             delay(2000);
+            #elif defined(HT16K33)
+            #elif defined(LCD1602)        
+            #endif
             cfgdata.putInt("stateflag",stateflag);
             cfgdata.putInt("timeremmain",timeRemain);
           }
@@ -2397,7 +3075,11 @@ void setup(){
           Serial.printf("After resume the stateflag is: %d\n",stateflag);  // if 5 resume job, if 3 clear job.      
         break;
       case 6:
+          #if defined(TM1637)
           display.scrollingText("Fi-dEL-Addr",2);
+          #elif defined(HT16K33)
+          #elif defined(LCD1602)      
+          #endif
           doc["response"]="delmac";
           doc["merchantid"]=cfginfo.payboard.merchantid;
           doc["uuid"]=cfginfo.payboard.uuid;
@@ -2426,8 +3108,12 @@ void setup(){
           cfgState = 3;     
         break;
       case 10: // Device Offline
+          #if defined(TM1637)
           display.scrollingText("oFFLinE",2);
-          display.print("OF");      
+          display.print("OF");     
+          #elif defined(HT16K33)
+          #elif defined(LCD1602)      
+          #endif 
           cfgState = 10;
           Serial.printf("******************** This Asset is OFFLINE. ******************** \n");
         break;
@@ -2578,7 +3264,12 @@ void setup(){
   }
   cfgdata.end();
 
+Serial.printf("cfgState: %d\n",cfgState);
+  #if defined(TM1637) 
   display.scrollingText("Func",2); 
+  #elif defined(HT16K33)
+  #elif defined(LCD1602)    
+  #endif
 
   delay(200);
   Serial.printf("\n\n");
@@ -2589,9 +3280,7 @@ void setup(){
   //------------------------------ v 1.0.6 ---------------------------------//
   // Add 2 Aug 23
 
-  mqttPingID = mqttPing.every(60*1000*60, mqttStateUpdate);
-
-  // mqttCheckID = mqttCheck.every(60*1000*1,mqttCheckConnection);
+  mqttPingID = mqttPing.every(60*1000*60, mqttStateUpdate); //Check mqtt every 60 minutes.
 
 } 
 //*--------------------------------- End of Setup. ---------------------------------*// 
@@ -2604,12 +3293,32 @@ void setup(){
 //*********************************** LOOP is here. *********************************** 
 void loop(){
 
+  #ifdef DEBUG_INPUT
+    washer.isMachineON(MACHINEDC);
+    washer.isDoorLock(DLOCK);
+    delay(500);
+  #endif
+
+
   if(WiFi.isConnected()){
-    blinkGPIO(WIFI_LED,300); 
-    //blinkWiFiID = blinkWiFi.pulseImmediate(WIFI_LED,650,HIGH);
+    //******* v1.0.5 **********
+    // #ifdef USE_RGBLED  // look at hdv70ed.h
+    //   leds[0] = CRGB::Green;
+    //   FastLED.show();
+    // #endif
 
     if(!mqclient.connected() && (cfgState >= 2)){
-      digitalWrite(BOOK_LED,LOW);
+      #ifdef USE_BOOKLED
+        digitalWrite(BOOK_LED,HIGH);
+      #endif
+
+      //******* v1.0.5 **********
+      #ifdef USE_RGBLED  // look at hdv70ed.h
+        // leds[0] = CRGB::Blue;
+        // FastLED.show();
+
+        toggleRGB(leds,0,CRGB::Magenta, CRGB::Black);
+      #endif
       pbBackendMqtt();
     }else{
       #ifdef FLIPUPMQTT
@@ -2618,136 +3327,275 @@ void loop(){
         }    
       #endif
 
-      //Serial.printf("cfgState: %d\n",cfgState);
-      //v1.0.9
-      BP14826 washer;
-
       switch(cfgState){
         case 1: //*** Not register not Configuration.
+            #if defined(TM1637)
             display.print("dC");
+            #elif defined(HT16K33)
+            #elif defined(LCD1602)      
+            #endif
             pbRegisMqtt();
             break;
         case 2: //*** Register but activate from backend.
+            #if defined(TM1637)
             display.print("dA");
+            #elif defined(HT16K33)
+            #elif defined(LCD1602)  
+            #endif
             //pbBackendMqtt();
             break;
-        case 3: //*** get config from File System.
+        case 3: //loop3 //*** get config from File System.
             //Serial.printf(" ------------ This is in cfgState 3 -----------%d\n",coinValue);
             digitalWrite(ENCOIN,HIGH);   // Waiting for Coin
-            digitalWrite(BOOK_LED,HIGH);
+            #ifdef USE_BOOKLED
+              digitalWrite(BOOK_LED,HIGH);     
+            #endif
+
+            //******* v1.0.5 **********
+            #ifdef USE_RGBLED  // look at hdv70ed.h
+              leds[0] = CRGB::Green;
+              FastLED.show();
+            #endif
 
             // if(washer.isMachineON(MACHINEDC)){
             //   Serial.println("Machine is on without payment. Then turn off machine.");
             //   washer.ctrlPower(POWER_RLY,MACHINEDC,washer.TURNOFF);
             // }
 
-            Serial.print("MachineDC: ");
-            Serial.println(digitalRead(MACHINEDC));
-            washer.isMachineON(MACHINEDC);
-
+            // Serial.print("MachineDC: ");
+            // Serial.println(digitalRead(MACHINEDC));
             if(coinValue > 0){
               cfgState = 4;
             }else{
-              String dispPrice;
+              String dispPrice, dispStime;
+              
               dispPrice = "--";
+              dispStime = "--";
               if(price[0]!=0){
                 dispPrice =  dispPrice + String(price[0]) + "--";
+                dispStime = dispStime + String(stime[0]) + "--";
               }
               if(price[1]!=0){
                 dispPrice = dispPrice + String(price[1]) + "--";
+                dispStime = dispStime + String(stime[1]) + "--";
               }
               if(price[2]!=0){
                 dispPrice = dispPrice + String(price[2]) + "--";
+                dispStime = dispStime + String(stime[2]) + "--";
               }
+              #if defined(TM1637)
               display.scrollingText(dispPrice.c_str(),1);
-              Serial.println("Machine Available. State 3.");
-              Serial.printf("   |-Show Price: %s\n",dispPrice.c_str());
+              #elif defined(HT16K33)
+              #elif defined(LCD1602)      
+              #endif
+
+              if(dispCount==0){  //initial dispCounter to be now.
+                dispCount=millis();
+                Serial.println();
+                Serial.println("State 3: Machine Available.");
+                Serial.printf("|--Service Price: %s\n",dispPrice.c_str());
+                Serial.printf("|--Service Time: %s\n",dispStime.c_str());
+                Serial.println();
+              }else{
+                if( (millis() - dispCount) >= 10000){
+                  dispCount = 0;
+                }
+              }
             }
             break;
-        case 4: //*** After coinValue > 0
-            display.setBacklight(30);
-            display.setColonOn(false);
+        case 4: //loop4 //*** After coinValue > 0  
+
+            if(dispCount == 0){
+              dispCount = millis();
+              Serial.println();
+              Serial.println("State 4: Waiting for payment complete.");
+            }else{
+              if( (millis() - dispCount) >= 10000){
+                dispCount = 0;
+              }
+            }
+
+
             disptxt = "";
             if(coinValue < 10){
               disptxt = "-0" +String(coinValue) +"-";
             }else{
               disptxt = "-" +String(coinValue) +"-";
             }
-            display.setCursor(0,0);
-            display.print(disptxt);
-            display.setCursor(0,1);
+
+            #if defined(TM1637)
+              display.setBacklight(30);
+              display.setColonOn(false);
+              display.setCursor(0,0);
+              display.print(disptxt);
+              display.setCursor(0,1);
+
+            #elif defined(HT16K33)
+            #elif defined(LCD1602)     
+              lcd.clear();
+              lcd.setCursor(0,0);
+              lcd.print("In Progress");
+              lcd.SetCursor(0,1);
+              lcd.print("Time Remain: " + disptxt);
+
+            #endif
+
+            #ifdef USE_BOOKLED
+              // digitalWrite(BOOK_LED,LOW);
+              // toggleGPIO(BOOK_LED);
+            #endif
+            #ifdef USE_RGBLED  // look at startup.h
+              leds[0] = CRGB::Blue;
+              FastLED.show();
+            #endif
 
 
             if((coinValue == price[0]) && (waitFlag == 0)){\
               waitFlag = 1;
               //cfgState = 5;
+              Serial.println("Wash Program 1");
               Serial.printf("Program 1 :%d\n", coinValue);
               timeRemain = stime[0];
               waitTimeID=waitTime.after(60*1000*coinwaittimeout,progStart);
               //waitTimeID=waitTime.after(60*1000*0.3,prog1start);
-              
+              dispCount = 0;
             }else if((coinValue == price[1]) && (waitFlag <= 1)){
               waitTime.stop(waitTimeID);
               waitFlag =2;
               //cfgState = 5;
+              Serial.println("Wash Program 2");
               Serial.printf("Program 2 :%d\n", coinValue);
               timeRemain = stime[1];
               waitTimeID=waitTime.after(60*1000*coinwaittimeout,progStart);
               //waitTimeID=waitTime.after(60*1000*0.3,prog2start);
-              
+              dispCount = 0;
             }else if((coinValue == price[2]) && (waitFlag <= 2)){
-              display.setBacklight(30);
-              display.print(coinValue);
-              display.setColonOn(true);
-              delay(300);
-
               waitTime.stop(waitTimeID);
               waitFlag= 3;
               //cfgState = 5;
+              Serial.println("Wash Program 3");
               Serial.printf("Program 3 :%d\n", coinValue);
               timeRemain = stime[2];
               waitTimeID=waitTime.after(60*1000*coinwaittimeout,progStart);
               //waitTimeID=waitTime.after(60*1000*0.3,prog3start);
               //prog3start();
-
+              dispCount = 0;
             }
+
             if(waitFlag == (prodcounter-1)){
               digitalWrite(ENCOIN,LOW);
             }
             stateUpdateTimer=0;
-            digitalWrite(BOOK_LED,LOW);
+
             break;
-        case 5:
-            //Serial.printf("Service running please wait\n");
-            display.setBacklight(30);
-            display.setColonOn(false);
-            disptxt = "";
-            if(!disperr.isEmpty()){
-              disptxt = disperr +"-";
-            }
+        case 5: //loop5
 
-            if(timeRemain <10){
-              disptxt = disptxt+ "T-0" +String(timeRemain);
+            if(dispCount == 0){
+              dispCount = millis();
+              Serial.println();
+              Serial.println("State 5: Machine is busy.");
+              Serial.printf("State 5: Time Remain: %d\n",timeRemain);
+              Serial.printf("ServiceTime %d: %u\n",serviceTimeID, serviceTime.getOperTime(serviceTimeID));
+              Serial.printf("waitTime %d: %u\n",waitTimeID, waitTime.getOperTime(waitTimeID));
+              Serial.printf("timeLeft %d: %u\n",timeLeftID, timeLeft.getOperTime(timeLeftID));
+               Serial.printf("mqttPing %d: %u\n",mqttPingID, mqttPing.getOperTime(mqttPingID));
+              Serial.printf("progTimer %d: %u\n",progTimerID, progTimer.getOperTime(progTimerID));
+              Serial.printf("progTimer2 %d: %u\n",progTimer2ID, progTimer2.getOperTime(progTimer2ID));
+
             }else{
-              disptxt = disptxt + "T-" + String(timeRemain);
+              if( (millis() - dispCount) >= 10000){
+                dispCount = 0;
+              }
             }
 
+            if(!disptxt.isEmpty()){
+              Serial.printf("State 5: %d\n",disptxt);
+              disptxt = "";
+            }
+
+            //If have error in disperr
+            if(!disperr.isEmpty()){
+              disptxt = "";
+              disptxt = disperr +"-";
+              Serial.println("Error: "+ disptxt);
+              disptxt = "";
+            }
+
+  
             #if defined(TM1637)
+              disptxt = "";
+              if(timeRemain <10){
+                disptxt = disptxt+ "T-0" +String(timeRemain);
+              }else{
+                disptxt = disptxt + "T-" + String(timeRemain);
+              }
+              display.setBacklight(30);
+              display.setColonOn(false);
               display.scrollingText(disptxt.c_str(),1);
               delay(1000);
               display.animation1(display,500,10,1);
+              disptxt="";
             #elif defined(HT16K33)
             #elif defined(LCD1602)
+              disptxt = "";
+              if(timeRemain <10){
+                disptxt = disptxt+ "T-0" +String(timeRemain);
+              }else{
+                disptxt = disptxt + "T-" + String(timeRemain);
+              }
               lcd.clear();
               lcd.setCursor(0,0);
               lcd.print("In Progress");
               lcd.setCursor(0,1);
               lcd.print("Time Remain: " + disptxt);
+              disptxt="";
               delay(1000);
             #endif    
+
+            #ifdef USE_BOOKLED
+              digitalWrite(BOOK_LED,LOW);
+              // toggleGPIO(BOOK_LED);
+            #endif
+
+
+            #ifdef USE_RGBLED  // look at startup.h
+              // Serial.println("LED: Blinking Green");
+              toggleRGB(leds,0,CRGB::Green, CRGB::Black);
+
+              // if(machineStart){
+              //   // leds[0] = CRGB::Red;
+              //   // FastLED.show();
+              //    toggleRGB(leds,0,CRGB::Green, CRGB::Black);
+              // }else{
+              //   toggleRGB(leds,0,CRGB::Red, CRGB::Black);
+              // }
+            #endif
+            
         
             break;
-        case 6:
+        case 6: //loop6  Faliled to start job
+              #if defined(TM1637)
+                display.scrollingText("JFts",1);
+              #elif defined(HT16K33)
+              #elif defined(LCD1602)
+                lcdText(0,0,"Failed to start job",1000);
+              #endif  
+              #ifdef USE_BOOKLED
+                // digitalWrite(BOOK_LED,LOW);
+                // toggleGPIO(BOOK_LED);
+              #endif
+
+              #ifdef USE_RGBLED  // look at startup.h
+                // Serial.println("LED: Blinking Red");
+                toggleRGB(leds,0,CRGB::Red, CRGB::Black);
+                // if(!machineStart){
+                //   toggleRGB(leds,0,CRGB::Red, CRGB::Black);
+                // }         
+              #endif
+
+              
+              Serial.println("Error: ******** Failed to start job. ********");
+              
             break;
         case 10:
             #if defined(TM1637)
@@ -2765,42 +3613,71 @@ void loop(){
       }
     }
   }else{
-    digitalWrite(WIFI_LED,LOW);
-    digitalWrite(BOOK_LED,LOW);
+    // digitalWrite(WIFI_LED,LOW);
+    #ifdef USE_BOOKLED
+      digitalWrite(BOOK_LED,LOW);
+    #endif
+
+    //******* v1.0.5 **********
+    #ifdef USE_RGBLED  // look at hdv70ed.h
+      // leds[0] = CRGB::Blue;
+      // FastLED.show();
+
+      toggleRGB(leds,0,CRGB::Magenta, CRGB::Black);
+    #endif
 
     digitalWrite(0,LOW);
-    Serial.printf("WiFi Connecting.....\n");
-    while (!WiFi.isConnected()) { 
-      if(twifi == 0){
-        twifi = millis();
-        Serial.print("TWifi:");
-        Serial.println(twifi);
-      }
 
-      display.print("nF");
-      //WebSerial.println("[nF]->WiFi Connected");
-      digitalWrite(WIFI_LED,LOW);
-      wifimulti.run();
+    connectToWiFi(wifimulti,5,true); //For testing
 
-      uint32_t tdiff = millis() - twifi;
-      // Serial.print("Tdiff:");
-      // Serial.println(tdiff);
+    /*  This comment for testing */
+    // Serial.printf("WiFi Connecting.....\n");
+    // while (!WiFi.isConnected()) { 
+    //   if(twifi == 0){
+    //     twifi = millis();
+    //     Serial.print("TWifi:");
+    //     Serial.println(twifi);
+    //   }
+    //   #if defined (TM1637)
+    //     display.print("nF");
+    //   #elif defined(HT16K33)
+    //   #elif defined(LCD1602)
+    //   #endif
+    //   //WebSerial.println("[nF]->WiFi Connected");
+    //   digitalWrite(WIFI_LED,LOW);
+    //   wifimulti.run();
 
-      if( tdiff > 60*1000*wifitimeout ){
-        Serial.println("Rebooting ESP due wifi not connect");
-        display.print("WrSt");
-        delay(2000);
-        ESP.restart();
-      }
-    }
+    //   uint32_t tdiff = millis() - twifi;
+    //   // Serial.print("Tdiff:");
+    //   // Serial.println(tdiff);
+
+    //   if( tdiff > 60*1000*wifitimeout ){
+    //     Serial.println("Rebooting ESP due wifi not connect");
+    //     #if defined (TM1637)
+    //       display.print("WrSt");
+    //     #elif defined(HT16K33)
+    //     #elif defined(LCD1602)
+    //     #endif
+    //     delay(2000);
+    //     ESP.restart();
+    //   }
+    // }
+    /*  This comment for testing */  
      
     //delay(1500);
     if(WiFi.isConnected()){
       Serial.println("connected");
       WiFiinfo();
 
+      //******* v1.0.5 **********
+      // #ifdef USE_RGBLED  // look at hdv70ed.h
+      //   leds[0] = CRGB::Green;
+      //   FastLED.show();
+      // #endif
       Serial.print("cfgState: ");
       Serial.println(cfgState);
+
+      
     }  
   }
   
@@ -2809,10 +3686,17 @@ void loop(){
   waitTime.update();
   timeLeft.update();
   mqttPing.update();
-  mqttCheck.update();
+  progTimer.update();
+  progTimer2.update();
+
   mqclient.loop();
   #ifdef FLIPUPMQTT
    mqflipup.loop();
+  #endif
+
+
+  #ifdef USE_RGBLED
+
   #endif
 
 }

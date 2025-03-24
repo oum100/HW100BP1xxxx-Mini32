@@ -1,3 +1,7 @@
+#include <Arduino.h>
+#include "animation.h"
+#include <LiquidCrystal_I2C.h>
+
 //#define TAWEE
 #define COTTON 1
 #define SELFCLEAN 6
@@ -20,6 +24,7 @@
         #define BLUE_LED    21
         #define WIFI_LED    2   
         #define BUZZ        14
+        #define BOOK_LED    4
 
         // #define TXDU1       17 
         // #define RXDU1       16  
@@ -32,7 +37,8 @@
         //Input IO
         #define MODESW      39
         #define COININ      35
-        #define DLOCK       33 
+        #define DLOCK       33
+        #define DSTATE      33 
         #define PROG1       34
         #define PROG2       5
 
@@ -49,19 +55,102 @@
         // int TOTALOUTPUT = sizeof(OUTPUTPIN);
 
 
+        //Below follow BP14826
+        //Output IO
+        #define CTRLPOWER   26
+        #define POWER_RLY   26
+
+        #define CTRLSTART   18
+        #define START_RLY   18
+
+        #define CTRLTEMP    32
+        #define TEMP_RLY    32
+
+        #define CTRLRINSE   27
+        #define RINSE_RLY   27
+
+        #define CTRLSPEED   15
+        #define SPEED_RLY   15
+
+        #define SWL1      22
+        #define SWL2      21
+        #define SWL3      33
+        #define SWL4      14
+
+        #define WIFI_LED   2
+
+        #define ENCOIN    4    //Coin
+        //#define UNLOCK    25    //Coin
+
+        #define BOOK_LED   19   
+        #define RGB_LED   19
+
+        //INPUT IO
+        #define COININ    35    //Coin
+        #define DSTATE    5
+        #define DLOCK     23
+        #define MODESW      39
+        #define MACHINEDC     34
+
+        
+        //#define LED60M    25
+
+        //Display IO
+        #define CLK 17
+        #define DIO 16
+
+        #define BUZZ 2
+        //End BP14826
 
     #endif
 
-//enum buttons{POWER,UP,DOWN, START,RINSE,TEMP,SPIN,WORK};
 
 
-void selftest(int A2,int A1,int A0, int CTRLSW);
-void buttonCtrl( int button, int pulse, int duty);
-void bcdconverter(int value, int *bit3, int *bit2, int *bit1, int *bit0);
+// enum buttons{POWER,UP,DOWN, START,RINSE,TEMP,SPIN,WORK};
+// void selftest(int A2,int A1,int A0, int CTRLSW);
+// void buttonCtrl( int button, int pulse, int duty);
+// void bcdconverter(int value, int *bit3, int *bit2, int *bit1, int *bit0);
 
-bool isHome(int ldrPin);
-bool startProg(int prognum);
+// bool isHome(int ldrPin);
+// bool startProg(int prognum);
 
 
 // void srvProgram(int prog,int temp, int water);
 // void selfClean(int refposition);
+
+class BP10829 {
+    public:
+        BP10829(void);
+        enum powerMODE {TURNOFF, TURNON};
+        enum buttons{POWER,UP,DOWN, START, RINSE,TEMP,SPIN,WORK};
+
+        //original
+        void selftest(int A2,int A1,int A0, int CTRLSW);
+        void buttonCtrl( int button, int pulse, int duty);
+        void bcdconverter(int value, int *bit3, int *bit2, int *bit1, int *bit0);
+
+        bool isHome(int ldrPin);
+        bool startProg(int prognum);
+
+        //Below add 26Aug24
+        void pulseGEN(bool logic, int qty, int width, int object);
+        void ctrlStart();
+        bool ctrlPower(int pwrPin, int machineDC,powerMODE mode);
+        void ctrlSpeed(int speed);
+        void ctrlTemp(int tmp);
+        void ctrlRinse(int rinse);
+        void ctrlProg(int prog);
+        void selfTest(void);
+        void ctrlCancel(void);
+
+        bool washProgram(int prog, int tmp, int speed, int rinse);
+        int runProgram(int prog, int tmp, int speed ,int rinse,LiquidCrystal_I2C &lcd,int &err);
+        int runProgram(int prog,int tmp, int speed ,int rinse,digitdisplay &disp,int &err);
+        // void progStart();
+        // void servicEnd();
+
+        bool isMachineON(int pin);// 1 = ON, 0 = Off
+        bool isMachineON(int pin,int &err);// 1 = ON, 0 = Off
+
+        bool isDoorLock(int pin);
+};
