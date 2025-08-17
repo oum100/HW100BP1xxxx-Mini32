@@ -60,7 +60,7 @@ bool BP14826::ctrlPower(int pwrPin, int machineDC,powerMODE mode){
     if(mode == 1){  // You want to Power ON machine
       delay(500);
 
-      if(!isMachineON(machineDC)){ // Check machineDC if 0 (off) then power ON it.
+      if(!isMachineON(machineDC)){ // MachineDC pin is high = machine is off then power ON it.
         Serial.println("[ctrlPower]: Turning on machine");
         pulseGEN(HIGH,1,1000,pwrPin);  //Turn on
         delay(1500); //Add delay
@@ -330,6 +330,9 @@ bool BP14826::isDoorLock(int pin){
     int countUnlock = 0;
 
     doorState = digitalRead(pin);
+    // #ifdef HW100BP14826ALLNEW_101x 
+    // doorState = !doorState ;
+    // #endif
     
     // for(int i =1;i>=3;i++){
     //    delay(300);
@@ -338,7 +341,6 @@ bool BP14826::isDoorLock(int pin){
     //   }else{
     //     countUnlock++;
     //   }
-     
     // }
 
     // Serial.print("countLock:");Serial.println(countLock);
@@ -350,7 +352,7 @@ bool BP14826::isDoorLock(int pin){
     //   doorState = false;
     // }
 
-
+    Serial.printf("************** [doorState] *************: %d\n",doorState);
     
     //May need to use value from interrupt
 

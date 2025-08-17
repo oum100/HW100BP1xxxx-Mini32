@@ -203,6 +203,8 @@ bool skipPriMqtt = false; //v1.0.13  Active payboard Mqtt server
 bool skipSecMqtt = false; //v1.0.13  Active flipup Mqtt server
 
 int mqttRetryLimit = 5;
+int sericeEndRetryLimit = 30;
+int serviceEndCount = 0;
 
 byte keyPress; //*** for keep keypress value.
 
@@ -217,8 +219,10 @@ String timeStamp;
 int timeRemain=0;
 
 
-uint32_t twifi =0;
+unsigned long twifi = 0;
+unsigned long tdiff = 0;
 int wifitimeout = 5; //in Minutes
+
 
 //secureEsp32FOTA esp32OTA("HW100BP10829", "1.0.0");
 
@@ -412,10 +416,11 @@ void connectToWiFi(WiFiMulti& wifiMulti, int maxRetries, bool restartOnFailure) 
       toggleGPIO(BOOK_LED);
     #elif defined(USE_RGBLED)
       toggleRGB(leds,0,CRGB::Magenta, CRGB::Black);
+      Serial.println("Point-1");
     #endif
 
-    Serial.print(".");
     retryCount++;
+    Serial.printf("...%d/%d",retryCount,maxRetries);
   }
 
   if (WiFi.status() == WL_CONNECTED) {
@@ -1373,8 +1378,8 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
       //  washer.buttonCtrl(SPIN,1,1000);
     #elif defined(HW100BP14826)
       machineStart = washer.washProgram(washer.SPIN,0,0,0); // 7 mins
-    #elif defined(HW100BP14826ALLNEW)
-      machineStart = washer.washProgram(washer.SPIN,0,0,0); // 7 mins
+    // #elif defined(HW100BP14826ALLNEW_101x)
+    //   machineStart = washer.washProgram(washer.SPIN,0,0,0); // 7 mins
     #elif defined(HW150BP14896)
       machineStart = washer.washProgram(washer.SPIN,0,0,0);
     #endif
@@ -1431,7 +1436,7 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     #elif defined(HW100BP14826) || defined(HW100BP14826ALLNEW)
       machineStart = washer.washProgram(washer.RINSESPIN,0,0,6); //Rinse about 26 mins
     #elif defined(HW150BP14896)
-      machineStart = washer.washProgram(washer.SPORT,0,0,0);
+      machineStart = washer.washProgram(washer.SPORT,1,1,0);
     #endif
 
     if(machineStart){  //unComment this row when production
@@ -1943,6 +1948,8 @@ void pbBackendMqtt(){
       }else{
         if(mqttRetry > mqttRetryLimit){
           skipPriMqtt = true;
+          Serial.println("\nRestarting due to MQTT Connection failed over limitation.");
+          ESP.restart();
         }
         Serial.printf("%d: Attemp connecting primary MQTT server.\n",mqttRetry);
         delay(3000);
@@ -2156,10 +2163,10 @@ void progStart(){
         machineStart = washer.washProgram(washer.SPORT,2,1,0);  //36Mins
         break;
       case 2: // Price 2 for 60mins
-        machineStart = washer.washProgram(washer.MIX,1,0,0); // about 1:07hrs
+        machineStart = washer.washProgram(washer.MIX,0,0,0); // about 1:07hrs
         break;
       case 3: // Price 3 for 90mins
-        machineStart = washer.washProgram(washer.MIX,3,0,2); // about 1:30 hrs
+        machineStart = washer.washProgram(washer.MIX,1,0,0); // about 1:30 hrs
         break;
     }
   #endif
@@ -2176,42 +2183,44 @@ void progStart(){
     backend.merchantKEY=cfginfo.payboard.merchantkey;
     backend.appkey=cfginfo.payboard.apikey;
 
-    while (!WiFi.isConnected()) { 
-      if(twifi == 0){
-        twifi = millis();
-        Serial.print("TWifi:");
-        Serial.println(twifi);
-      }
+    connectToWiFi(wifimulti,10,true); //For testing
+    // tdiff=0;
+    // while (!WiFi.isConnected()) { 
+    //   if(twifi == 0){
+    //     twifi = millis();
+    //     Serial.print("TWifi:");
+    //     Serial.println(twifi);
+    //   }
 
-      #if defined (TM1637)
-         display.print("nF");
-      #elif defined(HT16K33)
-      #elif defined(LCD1602)
-      #endif
+    //   #if defined (TM1637)
+    //      display.print("nF");
+    //   #elif defined(HT16K33)
+    //   #elif defined(LCD1602)
+    //   #endif
 
-      #ifdef USE_RGBLED
+    //   #ifdef USE_RGBLED
 
-      #endif
+    //   #endif
 
-      //WebSerial.println("[nF]->WiFi Connected");
-      // digitalWrite(WIFI_LED,LOW);
-      wifimulti.run();
+    //   //WebSerial.println("[nF]->WiFi Connected");
+    //   // digitalWrite(WIFI_LED,LOW);
+    //   wifimulti.run();
 
-      uint32_t tdiff = millis() - twifi;
-      // Serial.print("Tdiff:");
-      // Serial.println(tdiff);
+    //   tdiff = millis() - twifi;
+    //   // Serial.print("Tdiff:");
+    //   // Serial.println(tdiff);
 
-      if( tdiff > 60*1000*wifitimeout ){
-        Serial.println("Rebooting ESP due wifi not connect");
-        #if defined (TM1637)
-          display.print("WrSt");
-        #elif defined(HT16K33)
-        #elif defined(LCD1602)
-        #endif
-        delay(2000);
-        ESP.restart();
-      }
-    }
+    //   if( tdiff > 60*1000*wifitimeout ){
+    //     Serial.println("Rebooting ESP due wifi not connect");
+    //     #if defined (TM1637)
+    //       display.print("WrSt");
+    //     #elif defined(HT16K33)
+    //     #elif defined(LCD1602)
+    //     #endif
+    //     delay(2000);
+    //     ESP.restart();
+    //   }
+    // }
 
     switch(paymentby){
       case 1: // by Coin
@@ -2399,13 +2408,17 @@ void serviceEnd(){
     #endif
     mqttStateUpdate();
   }else{ // Door is lock -- machine not finish job yet then wait for one more minute
+    if(serviceEndCount < sericeEndRetryLimit){  //19 Jul 25 add this condition to force serviceEnd after 30 retries.
+      Serial.printf("Job still running. wait for one more minute\n");
+      disptxt="Wait one more minute for machine finish.";
 
-    Serial.printf("Job still running. wait for one more minute\n");
-    disptxt="Wait one more minute for machine finish.";
-
-    timeRemain = 1;
-    serviceTimeID=serviceTime.after((60*1000*timeRemain),serviceEnd);
-    timeLeftID = timeLeft.every(60*1000*timeRemain,serviceLeft);  // Add on 23 Mar 25
+      timeRemain = 1;
+      serviceTimeID=serviceTime.after((60*1000*timeRemain),serviceEnd);
+      timeLeftID = timeLeft.every(60*1000*timeRemain,serviceLeft);  // Add on 23 Mar 25   
+      serviceEndCount ++; 
+    }else{
+      resetState();
+    }
   }
 }
 
@@ -2428,6 +2441,7 @@ void resetState()
   disperr="";
   disptxt="";
   disponce = 0;
+  serviceEndCount = 0;
 
   cfgdata.begin("config",false);
   cfgdata.putInt("stateflag",0);
@@ -2442,7 +2456,6 @@ void resetState()
   #endif
   delay(2000);
 }
-
 
 
 //*********************************** Setup is here. *********************************** 
@@ -2576,8 +2589,9 @@ void setup(){
     Serial.printf("AddAP SSID[%d]: %s, Key[%d]: %s\n",i+1,cfginfo.wifissid[i].ssid.c_str(),i+1,cfginfo.wifissid[i].key.c_str());
   }
 
-
-  connectToWiFi(wifimulti, 10, true); //For testing
+ 
+  //Settting WiFi Connection 16Jul25
+  connectToWiFi(wifimulti, 10, true);
 
   /*  This comment for testing */
   // Serial.printf("Setup->WiFi connecting...\n"); 
@@ -2790,37 +2804,15 @@ void setup(){
   fpSubTopic = fpSubTopic + String(cfginfo.asset.merchantid) +"/"+ String(cfginfo.asset.assetid);
   #endif
 
-  //Keep WiFi connection
-  while (!WiFi.isConnected()) { 
-    Serial.println("Reconnecting WiFi...");
-    if(twifi == 0){
-      twifi = millis();
-      Serial.print("TWifi:");
-      Serial.println(twifi);
-    }
+  
+  //Keep WiFi connection 
+  connectToWiFi(wifimulti,10,true); //For testing
 
-    #if defined(TM1637)
-      display.print("nF");
-    #elif defined(HT16K33)
-    #elif defined(LCD1602)      
-    #endif
-    //WebSerial.println("[nF]->WiFi Connected");
-    // digitalWrite(WIFI_LED,LOW);
-    wifimulti.run();
 
-    uint32_t tdiff = millis() - twifi;
-    // Serial.print("Tdiff:");
-    // Serial.println(tdiff);
-
-    if( tdiff > 60*1000*wifitimeout ){
-      Serial.println("Rebooting ESP due wifi not connect");
-      display.print("WrSt");
-      delay(2000);
-      ESP.restart();
-    }
-  }
 
   if(WiFi.isConnected()){
+    twifi = 0;
+    tdiff = 0;
     // blinkGPIO(WIFI_LED,400); 
 
     //**** Connecting  MQTT
@@ -3306,6 +3298,8 @@ void loop(){
     //   leds[0] = CRGB::Green;
     //   FastLED.show();
     // #endif
+    twifi = 0;
+    tdiff = 0;
 
     if(!mqclient.connected() && (cfgState >= 2)){
       #ifdef USE_BOOKLED
@@ -3318,8 +3312,10 @@ void loop(){
         // FastLED.show();
 
         toggleRGB(leds,0,CRGB::Magenta, CRGB::Black);
+        Serial.println("Point-2");
       #endif
       pbBackendMqtt();
+
     }else{
       #ifdef FLIPUPMQTT
         if(!mqflipup.connected() && (cfgState >= 2)){
@@ -3624,20 +3620,23 @@ void loop(){
       // FastLED.show();
 
       toggleRGB(leds,0,CRGB::Magenta, CRGB::Black);
+      Serial.println("Point-3");
     #endif
 
     digitalWrite(0,LOW);
 
-    connectToWiFi(wifimulti,5,true); //For testing
+    //Always keep WiFi connected.  16Jul25
+    connectToWiFi(wifimulti,10,true); //For testing
 
+    // แก้ที่นี้ เข็คจำนวน retry เกินให้ reboot
     /*  This comment for testing */
     // Serial.printf("WiFi Connecting.....\n");
     // while (!WiFi.isConnected()) { 
-    //   if(twifi == 0){
-    //     twifi = millis();
-    //     Serial.print("TWifi:");
-    //     Serial.println(twifi);
-    //   }
+      // if(twifi == 0){
+      //   twifi = millis();
+      //   Serial.print("TWifi:");
+      //   Serial.println(twifi);
+      // }
     //   #if defined (TM1637)
     //     display.print("nF");
     //   #elif defined(HT16K33)
@@ -3647,20 +3646,20 @@ void loop(){
     //   digitalWrite(WIFI_LED,LOW);
     //   wifimulti.run();
 
-    //   uint32_t tdiff = millis() - twifi;
+      // tdiff = millis() - twifi;
     //   // Serial.print("Tdiff:");
     //   // Serial.println(tdiff);
 
-    //   if( tdiff > 60*1000*wifitimeout ){
-    //     Serial.println("Rebooting ESP due wifi not connect");
-    //     #if defined (TM1637)
-    //       display.print("WrSt");
-    //     #elif defined(HT16K33)
-    //     #elif defined(LCD1602)
-    //     #endif
-    //     delay(2000);
-    //     ESP.restart();
-    //   }
+      // if( tdiff > 60*1000*wifitimeout ){
+      //   Serial.println("Rebooting ESP due wifi not connect");
+      //   #if defined (TM1637)
+      //     display.print("WrSt");
+      //   #elif defined(HT16K33)
+      //   #elif defined(LCD1602)
+      //   #endif
+      //   delay(2000);
+      //   ESP.restart();
+      // }
     // }
     /*  This comment for testing */  
      
@@ -3675,9 +3674,7 @@ void loop(){
       //   FastLED.show();
       // #endif
       Serial.print("cfgState: ");
-      Serial.println(cfgState);
-
-      
+      Serial.println(cfgState);  
     }  
   }
   

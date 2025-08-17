@@ -9,6 +9,7 @@
 
 
 // SkyView: List of device that required Fixed MAC
+// #define FixedMAC "3C:E9:0E:54:C4:C0" //WM-004 Skyview: VUFRVUCLV2ZANEM
 // #define FixedMAC "3C:E9:0E:54:C2:70"  // WM-010 Skyview shop
 // #define FixedMAC "3C:E9:0E:54:C3:38"     // WM-012 Skyview shop
 
@@ -25,16 +26,15 @@
 
 /*-------------- Define machine model. select either one*/
 // #define HW100BP10829
-#define HW100BP14826
-// #define HW150BP14896
-// #define HW100BP14826ALLNEW
+// #define HW100BP14826    
+  //Important for in HW100BP14826.h define HW100BP14826ALLNEW_101x for RGB_LED pin 2 (move from pin 19)
+#define HW150BP14896
+
 
 
 #ifdef HW100BP10829
     #include "hw10010829.h"
 #elif defined(HW100BP14826)
-    #include "HW100BP14826.h"
-#elif defined(HW100BP14826ALLNEW)
     #include "HW100BP14826.h"
 #elif defined(HW150BP14896)
     #include "HW150BP14896.h"
@@ -117,59 +117,4 @@
     #include <FastLED.h>
 #endif
 
-
-
 #define DBprintf Serial.printf
-#ifdef HW10014826
-    //Output IO
-    #define CTRLPOWER   26
-    #define POWER_RLY   26
-
-    #define CTRLSTART   18
-    #define START_RLY   18
-
-    #define CTRLTEMP    32
-    #define TEMP_RLY    32
-
-    #define CTRLRINSE   27
-    #define RINSE_RLY   27
-
-    #define CTRLSPEED   15
-    #define SPEED_RLY   15
-
-    #define SWL1      22
-    #define SWL2      21
-    #define SWL3      33
-    #define SWL4      14
-
-    #define WIFILED   2
-
-    #define ENCOIN    4    //Coin
-    //#define UNLOCK    25    //Coin
-
-    #define BOOKLED   19   
-
-    //INPUT IO
-    #define COININ    35    //Coin
-    #define DSTATE    5
-    #define DLOCK     23
-    #define MODESW      39
-    #define MACHINEDC     34
-
-    
-    //#define LED60M    25
-
-    //Display IO
-    #define CLK 17
-    #define DIO 16
-
-    #define BUZZ 2
-
-    //Interrutp set
-    #define INPUT_SET ((1ULL<<COININ)|(1ULL<<MODESW)|(1ULL<<DSTATE))
-
-    const byte NUMBER_OF_OUTPUT = 12;
-    byte OUTPUTPIN[NUMBER_OF_OUTPUT] = {CTRLPOWER,CTRLSTART,CTRLTEMP,CTRLRINSE,CTRLSPEED,SWL1,SWL2,SWL3,SWL4,ENCOIN,BOOKLED,WIFILED};
-    const byte NUMBER_OF_INPUT = 2;
-    byte INPUTPIN[NUMBER_OF_INPUT] = {MACHINEDC,DLOCK};
-#endif

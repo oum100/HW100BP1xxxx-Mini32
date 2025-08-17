@@ -47,7 +47,7 @@ void BP14896ES9::ctrlPower(int pwrPin, int machineDC,powerMODE mode){
     Serial.println();
     Serial.print("Performing ctrlPower\n");
 
-    if(isMachineON(machineDC)){ //Machine start now ON
+    if(isMachineON(machineDC)){ //Machine start now Machine is ON
       if(mode == 0){
         Serial.println("Requesting TURNOFF --> Founded machine ON. Then turn machine OFF");
         pulseGEN(HIGH,1,2000,pwrPin);
@@ -126,6 +126,7 @@ void BP14896ES9::ctrlProg(int program,int direction){
                 Serial.printf("SPORT\n");
                 break;                               
         }
+        send_DataEncoder(SWA,SWB,2,400,direction); // ต้องหมุนก่อน 1 ครั้ง เพราะเครื่องจำค่าการซักเดิม ถ้าไม่มีจะทำให้การตั้งโปรแกรมเพี้ยน
         prog = digitalRead(program);  // Read to check, Is it at program needed ?
         while(!prog){
             send_DataEncoder(SWA,SWB,2,400,direction);   //Rotating until program needed.
@@ -292,8 +293,8 @@ bool BP14896ES9::isMachineON(int pin,int &err){
 
 
 bool BP14896ES9::isDoorLock(int pin){
-    delay(3);
-    if(digitalRead(pin)){
+    // delay(3);
+    if(digitalRead(pin)){ // Modify 29 Jun 25
         Serial.printf("[isDoorLock]->Door Lock\n");
         return true; // Door Lock
     }else{
