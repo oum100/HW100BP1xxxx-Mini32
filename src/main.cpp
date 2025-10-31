@@ -203,7 +203,7 @@ bool skipPriMqtt = false; //v1.0.13  Active payboard Mqtt server
 bool skipSecMqtt = false; //v1.0.13  Active flipup Mqtt server
 
 int mqttRetryLimit = 5;
-int sericeEndRetryLimit = 30;
+int sericeEndRetryLimit = 10; //Change from 30 to 10 on 1 Nov 25
 int serviceEndCount = 0;
 
 byte keyPress; //*** for keep keypress value.
