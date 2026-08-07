@@ -1,3 +1,5 @@
+// #define FixedMAC "3C:E9:0E:54:C4:C0"   // Mac addreess for test only
+
 // ******** v1.0.5 ********
 // #define FixedMAC "8C:AA:B5:00:00:01"   // Mac addreess for test only
 // Production MAC Address Haier HW100BP10829
@@ -26,9 +28,13 @@
 
 /*-------------- Define machine model. select either one*/
 // #define HW100BP10829
-// #define HW100BP14826    
+#define HW100BP14826
   //Important for in HW100BP14826.h define HW100BP14826ALLNEW_101x for RGB_LED pin 2 (move from pin 19)
-#define HW150BP14896
+  //Skyview:
+  // WH-016
+
+
+// #define HW150BP14896
 
 
 

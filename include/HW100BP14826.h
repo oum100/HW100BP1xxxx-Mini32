@@ -6,7 +6,9 @@
 #define HW100BP14826_h
 
 #define HW100BP14826
-//   #define HW100BP14826ALLNEW_101x   //*********** บอร์ดสีม่วง เจ้าปัญหา ให้ uncomment นี้ด้วย
+  //SkyView WH-016, WH-020
+  #define HW100BP14826ALLNEW_101x   //*********** บอร์ดสีม่วง เจ้าปัญหา ให้ uncomment นี้ด้วย
+
 
 #ifdef HW100BP14826
     //Output IO

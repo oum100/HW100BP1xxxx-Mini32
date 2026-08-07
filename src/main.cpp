@@ -1293,7 +1293,7 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
         cfgdata.putString("apikey",cfginfo.payboard.apikey);
       
         cfginfo.payboard.mqtthost = doc["mqtthost"].as<String>();
-        cfginfo.payboard.mqttport = doc["mqttportt"].as<int>();
+        cfginfo.payboard.mqttport = doc["mqttport"].as<int>();
         cfginfo.payboard.mqttuser = doc["mqttuser"].as<String>();
         cfginfo.payboard.mqttpass = doc["mqttpass"].as<String>();
         cfgdata.putString("mqtthost",cfginfo.payboard.mqtthost);
@@ -1322,7 +1322,7 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
         cfgdata.putString("apikey",cfginfo.payboard.apikey);  
       }else if(params.equals("mqtthost")){
         cfginfo.payboard.mqtthost = doc["mqtthost"].as<String>();
-        cfginfo.payboard.mqttport = doc["mqttportt"].as<int>();
+        cfginfo.payboard.mqttport = doc["mqttport"].as<int>();
         cfginfo.payboard.mqttuser = doc["mqttuser"].as<String>();
         cfginfo.payboard.mqttpass = doc["mqttpass"].as<String>();
         cfgdata.putString("mqtthost",cfginfo.payboard.mqtthost);
