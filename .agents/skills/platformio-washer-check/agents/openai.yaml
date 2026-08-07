@@ -1,0 +1,6 @@
+interface:
+  display_name: "PlatformIO Washer Check"
+  short_description: "Safely build and review washer firmware"
+  default_prompt: "Use $platformio-washer-check to inspect the repository, build the active PlatformIO target, and report risks without uploading firmware."
+policy:
+  allow_implicit_invocation: true

@@ -16,7 +16,7 @@
 - Stored release artifact: `bin/HW100BP10829-1.0.1.bin`; its metadata is older than the source
 - Custom partition table exists but is disabled in `platformio.ini`
 - Last local build verification: successful on 2026-08-07
-- Build size at that verification: RAM 53,668/327,680 bytes (16.4%), flash 1,060,397/1,310,720 bytes (80.9%)
+- Build size at latest verification: RAM 53,668/327,680 bytes (16.4%), flash 1,060,373/1,310,720 bytes (80.9%)
 
 The project also contains support code for `HW100BP10829` and `HW150BP14896`, but they are not selected in the current build.
 
@@ -36,6 +36,7 @@ The project also contains support code for `HW100BP10829` and `HW150BP14896`, bu
 - `platformio.ini`: board, upload and library settings
 - `payboard.json`: old MQTT protocol notes/example; treat as reference, not authoritative spec
 - `MQTT_PROTOCOL.md`: canonical MQTT topics, connection parameters, command/response contract and current compatibility notes
+- `.agents/skills/platformio-washer-check/SKILL.md`: repository-local read-only environment/build/review workflow
 - Root `.ino` files and `interrupt.*`: legacy snapshots; normal PlatformIO build uses `src/`
 
 ## Runtime flow
@@ -104,7 +105,7 @@ Preferred commands:
 
 `pio` is not currently on the shell PATH, so use the absolute executable above unless the environment is activated. Upload port is currently fixed to `/dev/cu.usbserial-10`; verify the actual device before upload. Never upload, erase NVS, or change a running machine without explicit user approval.
 
-The current target builds successfully but emits warnings: missing return paths in `Timer`, backend and Payboard API functions; duplicate GPIO macro definitions in `hw10010829.h`; deprecated external LittleFS; and FastLED falling back to bit-banged SPI. Treat new warnings as regressions and reduce the existing set deliberately.
+The current target builds successfully. A clean build has historically emitted warnings for missing return paths in `Timer`, backend and Payboard API functions, duplicate GPIO macro definitions in `hw10010829.h`, deprecated external LittleFS, and FastLED falling back to bit-banged SPI. Treat new warnings as regressions and reduce the existing set deliberately.
 
 ## Development rules
 
@@ -119,6 +120,19 @@ The current target builds successfully but emits warnings: missing return paths 
 - Treat `MQTT_PROTOCOL.md` as the primary communication contract and update it in the same change as MQTT code.
 - Update source version, OTA metadata and binary metadata together for a release.
 - Add a bench test checklist for relay polarity, power sensing, door lock sensing, coin debounce, interrupted jobs and backend outage before field deployment.
+
+## Codex working workflow
+
+For substantive changes, use this sequence:
+
+1. `/plan`: define scope, risks, files and validation before editing.
+2. Implement the smallest scoped change while preserving unrelated edits.
+3. `/diff`: inspect the complete diff, credentials, model macros, MQTT payloads and GPIO changes.
+4. `/review`: run an independent review and resolve blocker/high findings.
+5. Run the repository Skill `platformio-washer-check` and `platformio run`.
+6. Commit with an intentional message; upload firmware only after explicit hardware authorization.
+
+The repository Skill is the only project-local Skill currently defined. Add another Skill only when a repeated workflow cannot be expressed clearly in the existing one.
 
 ## Security and known technical debt
 
