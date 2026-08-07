@@ -193,6 +193,14 @@ void getNVCFG(Preferences nvcfg, Config &cfg){
             cfg.asset.ntpServer2 = nvcfg.getString("ntpserver2");
         }   
 
+        if(nvcfg.isKey("fixedmac")){
+            cfg.asset.mac = nvcfg.getString("fixedmac");
+        }
+
+        if(nvcfg.isKey("uuid")){
+            cfg.payboard.uuid = nvcfg.getString("uuid");
+        }
+
         if(nvcfg.isKey("merchantid")){
             cfg.payboard.merchantid = nvcfg.getString("merchantid");
             cfg.payboard.mqttuser = cfg.payboard.merchantid;
@@ -218,6 +226,35 @@ void getNVCFG(Preferences nvcfg, Config &cfg){
         if(nvcfg.isKey("mqttport")){
             cfg.payboard.mqttport = nvcfg.getInt("mqttport");
         }
+
+        if(nvcfg.isKey("mqttuser")){
+            cfg.payboard.mqttuser = nvcfg.getString("mqttuser");
+        }
+
+        if(nvcfg.isKey("mqttpass")){
+            cfg.payboard.mqttpass = nvcfg.getString("mqttpass");
+        }
+
+        // Backend overrides use a separate prefix to avoid colliding with Payboard keys.
+        if(nvcfg.isKey("backend_apihost")){
+            cfg.backend.apihost = nvcfg.getString("backend_apihost");
+        }
+        if(nvcfg.isKey("backend_apikey")){
+            cfg.backend.apikey = nvcfg.getString("backend_apikey");
+        }
+        if(nvcfg.isKey("backend_mqtthost")){
+            cfg.backend.mqtthost = nvcfg.getString("backend_mqtthost");
+        }
+        if(nvcfg.isKey("backend_mqttport")){
+            cfg.backend.mqttport = nvcfg.getInt("backend_mqttport");
+        }
+        if(nvcfg.isKey("backend_mqttuser")){
+            cfg.backend.mqttuser = nvcfg.getString("backend_mqttuser");
+        }
+        if(nvcfg.isKey("backend_mqttpass")){
+            cfg.backend.mqttpass = nvcfg.getString("backend_mqttpass");
+        }
+
 
         if(nvcfg.isKey("sku1")){
             cfg.product[0].sku = nvcfg.getString("sku1");
@@ -784,5 +821,3 @@ String getdeviceid(void){
     
     return chipname;
 }
-
-

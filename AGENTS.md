@@ -111,6 +111,8 @@ The current target builds successfully. A clean build has historically emitted w
 
 The `native` test environment currently runs Timer tests without hardware by mocking `millis()`, `digitalWrite()` and `Serial`. These tests validate software timing behavior only; relay polarity, coin pulses, door lock sensing and machine programs still require bench hardware.
 
+On boot, the setup Serial prompt accepts `fixedmac=AA:BB:CC:DD:EE:FF` within the 15-second window. It stores `fixedmac`, clears `uuid`, and the current boot proceeds to registration using that identity; sending `y` still erases NVS. Validate the replacement MAC and backend registration before using this on a live device.
+
 ## Development rules
 
 - Treat `src/main.cpp` as production-sensitive: payment, relays, machine state and backend reporting are tightly coupled.

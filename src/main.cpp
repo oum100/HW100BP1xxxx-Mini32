@@ -2543,13 +2543,13 @@ void setup(){
     delay(500);
   }
 
-  byte keyin = ' ';  // Accept key y or Y from serial port only
+  String serialCommand;
   while(Serial.available() > 0){
-    keyin = Serial.read();
-      //Serial.println(keyin);
+    serialCommand += static_cast<char>(Serial.read());
   }
+  serialCommand.trim();
 
-  if((keyin == 121) || (keyin == 89)){
+  if(serialCommand.equalsIgnoreCase("y")){
 
     nvs_flash_erase(); // erase the NVS partition and...
     nvs_flash_init(); // initialize the NVS partition.
@@ -2562,6 +2562,28 @@ void setup(){
       lcdText(0,0,"NV-RAM Deleted.",1000);    
     #endif
 
+  }
+  else if(serialCommand.startsWith("fixedmac=") || serialCommand.startsWith("FIXEDMAC=")){
+    String fixedMac = serialCommand.substring(serialCommand.indexOf('=') + 1);
+    fixedMac.trim();
+    bool validFixedMac = fixedMac.length() == 17;
+    for(int i=0; validFixedMac && i<17; i++){
+      if((i % 3) == 2){
+        validFixedMac = fixedMac[i] == ':';
+      }else{
+        validFixedMac = isHexadecimalDigit(fixedMac[i]);
+      }
+    }
+    if(validFixedMac){
+      cfgdata.begin("config",false);
+      cfgdata.putString("fixedmac",fixedMac);
+      cfgdata.remove("uuid");
+      cfgdata.end();
+      Serial.printf("Fixed MAC saved: %s\n",fixedMac.c_str());
+      Serial.println("UUID cleared; device will register with fixed MAC after reboot.");
+    }else{
+      Serial.println("Invalid fixedmac command. Use fixedmac=AA:BB:CC:DD:EE:FF");
+    }
   }
   Serial.printf("\n************** Setting up this device **************\n");
 
@@ -2676,11 +2698,15 @@ void setup(){
   #else
     cfginfo.asset.mac = WiFi.macAddress();  // Using device mac address
   #endif
+  getNVCFG(cfgdata, cfginfo);
 
   // Coin Wait Timeout
   coinwaittimeout = cfginfo.asset.coinwaittimeout;
   Serial.print(" Coin Wait Timeout: ");
   Serial.println(coinwaittimeout);
+
+  updeteAvailable = cfginfo.asset.updateAvailable;
+  updateBusy = cfginfo.asset.updateBusy;
 
   Serial.println();
   Serial.println("---------Device Infomation--------");
@@ -2689,57 +2715,12 @@ void setup(){
 
  
 
-  //**** Getting config from NV-RAM
-  Serial.println("--------- Getting Merchant Information --------");
-  cfgdata.begin("config",false);
-  if(cfgdata.isKey("merchantid")){
-    cfginfo.payboard.merchantid = cfgdata.getString("merchantid");
-    Serial.printf("  1. Used Merchantid from NV-RAM: %s\n",cfginfo.payboard.merchantid.c_str());
-  }else{
-    if(cfginfo.payboard.merchantid.isEmpty()){
-      cfginfo.payboard.merchantid = "1000000104";  //this is default mmerchant id
+  // NVS values have been merged into cfginfo by getNVCFG().
+  prodcounter=0;
+  for(int i=0; i<sizeof(cfginfo.product)/sizeof(cfginfo.product[0]); i++){
+    if(!cfginfo.product[i].sku.isEmpty()){
+      prodcounter++;
     }
-    Serial.printf("  1. Used Mechantid from Initialized: %s\n",cfginfo.payboard.merchantid.c_str());
-  }
-
-  if(cfgdata.isKey("merchantkey")){
-    cfginfo.payboard.merchantkey = cfgdata.getString("merchantkey");
-    if(!cfgdata.isKey("mqttpass")){
-      cfginfo.payboard.mqttpass = cfginfo.payboard.merchantkey;
-    }
-  }
-
-    //-------------------- Mqtt Information -------------------
-  if(cfgdata.isKey("mqtthost")){
-    cfginfo.payboard.mqtthost = cfgdata.getString("mqtthost");
-    cfginfo.payboard.mqttport = cfgdata.getInt("mqttport");
-    cfginfo.payboard.mqttuser = cfgdata.getString("mqttuser");
-    cfginfo.payboard.mqttpass = cfgdata.getString("mqttpass");
-
-    Serial.printf("  1.1. Used Mqtt host from NV-RAM: %s\n",cfginfo.payboard.mqtthost.c_str());
-  }else{
-    Serial.printf("  1.1. Used Mqtt host from Initialized: %s\n",cfginfo.payboard.mqtthost.c_str());
-  }
-
-
-  //------------------- Fixed Mac Address Information -------
-  if(cfgdata.isKey("fixedmac")){
-    cfginfo.asset.mac = cfgdata.getString("fixedmac");
-    Serial.printf("  2.Used NV-RAM Fixed MacAddress: %s\n",cfginfo.asset.mac.c_str());
-  }else{
-    #ifdef FixedMAC
-       Serial.printf("  2.Useed Define Fixed MacAddress: %s\n",cfginfo.asset.mac.c_str());
-    #else
-       Serial.printf("  2.Used Device MacAddress: %s\n",cfginfo.asset.mac.c_str());
-    #endif
-  }
-
-
-  if(cfgdata.isKey("sku1")){
-    prodcounter=getnvProduct(cfgdata,cfginfo);
-    Serial.printf("  3. Used product information from NV-RAM\n");
-  }else{
-    Serial.printf("  3. Used product infomation from Initialized\n");
   }
 
 
@@ -2752,48 +2733,13 @@ void setup(){
   }
 
 
-  //------------------- upadateAvailable and updateBusy Information -------
- 
-  if(cfgdata.isKey("updateAvailable")){
-    cfginfo.asset.updateAvailable = cfgdata.getInt("updateAvailable");
-    updeteAvailable = cfginfo.asset.updateAvailable;
-    Serial.printf("  4. Used updateAvailable from NV-RAM: %d minutes\n",updeteAvailable );
-  }else{
-    updeteAvailable = cfginfo.asset.updateAvailable;
-    Serial.printf("  5. Used updateAvailable from Initialized: %d minutes\n",updeteAvailable );
-  }
-
-  if(cfgdata.isKey("updateBusy")){
-    cfginfo.asset.updateBusy = cfgdata.getInt("updateBusy");
-    updateBusy = cfginfo.asset.updateBusy;
-    Serial.printf("  5.1 Used updateBusy from NV-RAM: %d minutes\n",updateBusy );
-  }else{
-    updateBusy = cfginfo.asset.updateBusy;
-    Serial.printf("  5.1 Used updateBusy from Initialized: %d minutes\n",updateBusy );
-  }
-
-  cfgdata.end();
-
-  cfgdata.begin("config",false); //***<<<<<<<<< config preferences   // Don't delete this lin
-
-  //------------------- Coin Module Information -------
-  //*** Set price per coin
-  if(cfgdata.isKey("coinModule")){
-    cfginfo.asset.coinModule = cfgdata.getInt("coinModule");
-    Serial.printf("  6. Used coinModule from NV-RAM: %d\n",cfginfo.asset.coinModule );
-    Serial.printf("      -- 0: Single Coin Acceptor,  1: Multi Coin Acceptor\n");
-  }else{
-    // cfginfo.asset.coinModule = 0;
-    Serial.printf("  6. Used coinModule from Initialized: %d\n",cfginfo.asset.coinModule );
-    Serial.printf("      -- 0: Single Coin Acceptor,  1: Multi Coin Acceptor\n");
-  }
   if(cfginfo.asset.coinModule){
     pricePerCoin = 1;  //CoinModule is 1 or enum Multi
   }else{
     pricePerCoin = 10; //CoinModule is 0 or enum SINGLE
   }
 
-  
+  cfgdata.begin("config",false);
   // ************  Get UUID ***************
   if(cfgdata.isKey("uuid")){
     Serial.printf("Getting UUID from NV-RAM\n");
