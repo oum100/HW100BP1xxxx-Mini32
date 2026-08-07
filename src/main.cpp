@@ -203,7 +203,7 @@ bool skipPriMqtt = false; //v1.0.13  Active payboard Mqtt server
 bool skipSecMqtt = false; //v1.0.13  Active flipup Mqtt server
 
 int mqttRetryLimit = 5;
-int sericeEndRetryLimit = 30;
+int sericeEndRetryLimit = 10; //Change from 30 to 10 on 1 Nov 25
 int serviceEndCount = 0;
 
 byte keyPress; //*** for keep keypress value.
@@ -1293,7 +1293,7 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
         cfgdata.putString("apikey",cfginfo.payboard.apikey);
       
         cfginfo.payboard.mqtthost = doc["mqtthost"].as<String>();
-        cfginfo.payboard.mqttport = doc["mqttportt"].as<int>();
+        cfginfo.payboard.mqttport = doc["mqttport"].as<int>();
         cfginfo.payboard.mqttuser = doc["mqttuser"].as<String>();
         cfginfo.payboard.mqttpass = doc["mqttpass"].as<String>();
         cfgdata.putString("mqtthost",cfginfo.payboard.mqtthost);
@@ -1322,7 +1322,7 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
         cfgdata.putString("apikey",cfginfo.payboard.apikey);  
       }else if(params.equals("mqtthost")){
         cfginfo.payboard.mqtthost = doc["mqtthost"].as<String>();
-        cfginfo.payboard.mqttport = doc["mqttportt"].as<int>();
+        cfginfo.payboard.mqttport = doc["mqttport"].as<int>();
         cfginfo.payboard.mqttuser = doc["mqttuser"].as<String>();
         cfginfo.payboard.mqttpass = doc["mqttpass"].as<String>();
         cfgdata.putString("mqtthost",cfginfo.payboard.mqtthost);
