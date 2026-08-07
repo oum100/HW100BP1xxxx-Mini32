@@ -71,5 +71,7 @@ int shadowPb::coinCounter(const char *uuid, int amount, String status, String pa
         http.end();
         return rescode;
     }
-    
+
+    // HTTP 200 but Shadow Payboard business status is not successful.
+    return 500;
 }

@@ -726,6 +726,11 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     String newMerchantid = doc["merchantid"].as<String>();
     String newMerchantkey = doc["merchantkey"].as<String>();
 
+    cfginfo.payboard.merchantid = newMerchantid;
+    cfginfo.payboard.merchantkey = newMerchantkey;
+    cfginfo.payboard.mqttuser = newMerchantid;
+    cfginfo.payboard.mqttpass = newMerchantkey;
+
     cfgdata.begin("config",false);
     cfgdata.putString("merchantid",newMerchantid);
     cfgdata.putString("merchantkey",newMerchantkey);
@@ -765,21 +770,30 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     #endif  
 
     String newMqtthost = doc["mqtthost"].as<String>();
-    String newMqttport = doc["mqttport"].as<String>();
+    int newMqttport = doc["mqttport"].isNull()
+                        ? doc["mqttportt"].as<int>()
+                        : doc["mqttport"].as<int>();
     String newMqttuser = doc["mqttuser"].as<String>();
     String newMqttpass = doc["mqttpass"].as<String>();
 
     cfgdata.begin("config",false);
     cfgdata.putString("mqtthost",newMqtthost);
-    cfgdata.putString("mqttport",newMqttport);
+    cfgdata.putInt("mqttport",newMqttport);
     cfgdata.putString("mqttuser",newMqttuser);
     cfgdata.putString("mqttpass",newMqttpass);
     cfgdata.end();
 
     doc.clear();
     doc["response"]="setmqtt";
-    doc["desc"]="mqtt config saved. System will reboot in 5 seconds";
-    delay(5000);
+    doc["desc"]="mqtt config saved. System will reboot shortly";
+    serializeJson(doc,jsonmsg);
+    if(!mqclient.connected()) pbBackendMqtt();
+    mqclient.publish(pbPubTopic.c_str(),jsonmsg.c_str());
+    #ifdef FLIPUPMQTT
+      if(!mqflipup.connected()) fpBackendMqtt();
+      mqflipup.publish(fpPubTopic.c_str(),jsonmsg.c_str());
+    #endif
+    delay(500);
     ESP.restart();
 
   }else if(action == "stateupdate"){ // {"action":"stateupdate","available":"60","busy":"1"}
@@ -1214,6 +1228,9 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     #endif
     cfginfo.asset.coinModule = (doc["coinmodule"].as<String>() == "single")?SINGLE:MULTI; //  SINGLE=0, MULTI=1
     (cfginfo.asset.coinModule == MULTI)?pricePerCoin=1:pricePerCoin=10;
+    cfgdata.begin("config",false);
+    cfgdata.putInt("coinModule",cfginfo.asset.coinModule);
+    cfgdata.end();
 
     doc.clear();
     doc["response"] = "coinmodule";
@@ -1259,7 +1276,7 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     #endif
     cfginfo.asset.assettype = doc["assettype"].as<int>();
     cfgdata.begin("config",false);
-    cfgdata.putInt("assettype",0);
+    cfgdata.putInt("assettype",cfginfo.asset.assettype);
     cfgdata.end();
 
     doc.clear();
@@ -1293,7 +1310,9 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
         cfgdata.putString("apikey",cfginfo.payboard.apikey);
       
         cfginfo.payboard.mqtthost = doc["mqtthost"].as<String>();
-        cfginfo.payboard.mqttport = doc["mqttport"].as<int>();
+        cfginfo.payboard.mqttport = doc["mqttport"].isNull()
+                                      ? doc["mqttportt"].as<int>()
+                                      : doc["mqttport"].as<int>();
         cfginfo.payboard.mqttuser = doc["mqttuser"].as<String>();
         cfginfo.payboard.mqttpass = doc["mqttpass"].as<String>();
         cfgdata.putString("mqtthost",cfginfo.payboard.mqtthost);
@@ -1322,7 +1341,9 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
         cfgdata.putString("apikey",cfginfo.payboard.apikey);  
       }else if(params.equals("mqtthost")){
         cfginfo.payboard.mqtthost = doc["mqtthost"].as<String>();
-        cfginfo.payboard.mqttport = doc["mqttport"].as<int>();
+        cfginfo.payboard.mqttport = doc["mqttport"].isNull()
+                                      ? doc["mqttportt"].as<int>()
+                                      : doc["mqttport"].as<int>();
         cfginfo.payboard.mqttuser = doc["mqttuser"].as<String>();
         cfginfo.payboard.mqttpass = doc["mqttpass"].as<String>();
         cfgdata.putString("mqtthost",cfginfo.payboard.mqtthost);
@@ -1757,10 +1778,10 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     Serial.println(msg);
 
     doc.clear();
-    doc["response"] = "nvsdelete";
+    doc["response"] = "selftest";
     doc["merchantid"]=cfginfo.payboard.merchantid;
     doc["uuid"]=cfginfo.payboard.uuid;
-    doc["state"]="NV-RAM deleted";
+    doc["state"]="Selftest completed";
     doc["desc"]=msg;    
 
     cfgdata.begin("config",false);
@@ -1842,6 +1863,9 @@ void pbCallback(char* topic, byte* payload, unsigned int length){
     String ntpValue = doc["value"].as<String>();
 
     (ntpInx == 1)?cfginfo.asset.ntpServer1=ntpValue : cfginfo.asset.ntpServer2 = ntpValue;
+    cfgdata.begin("config",false);
+    cfgdata.putString((ntpInx == 1) ? "ntpserver1" : "ntpserver2",ntpValue);
+    cfgdata.end();
 
     doc.clear();
     doc["response"] = "setntp";
@@ -2676,6 +2700,13 @@ void setup(){
       cfginfo.payboard.merchantid = "1000000104";  //this is default mmerchant id
     }
     Serial.printf("  1. Used Mechantid from Initialized: %s\n",cfginfo.payboard.merchantid.c_str());
+  }
+
+  if(cfgdata.isKey("merchantkey")){
+    cfginfo.payboard.merchantkey = cfgdata.getString("merchantkey");
+    if(!cfgdata.isKey("mqttpass")){
+      cfginfo.payboard.mqttpass = cfginfo.payboard.merchantkey;
+    }
   }
 
     //-------------------- Mqtt Information -------------------
@@ -3697,4 +3728,4 @@ void loop(){
   #endif
 
 }
-//*--------------------------------- End of LOOP. ---------------------------------*// 
+//*--------------------------------- End of LOOP. ---------------------------------*//

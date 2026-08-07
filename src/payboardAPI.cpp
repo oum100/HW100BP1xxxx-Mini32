@@ -86,6 +86,9 @@ int payboard::registerDEV(const char*  macaddr, String &uuid, String &resJson){
         http.end();
         return rescode;
     }
+
+    // HTTP 200 but Payboard business status is not successful.
+    return 500;
 }
 
 
@@ -143,6 +146,9 @@ int payboard::requestQR(const char* uuid, const char* sku, qrOutput &response,St
         http.end();
         return rescode;
     }
+
+    // HTTP 200 but Payboard business status is not successful.
+    return 500;
 }
 
 
@@ -198,6 +204,9 @@ int payboard::deviceStart(const char *trans,String &response){
         http.end();
         return rescode;
     }
+
+    // HTTP 200 but Payboard business status is not successful.
+    return 500;
 }
 
 
@@ -253,6 +262,9 @@ int payboard::deviceStop(const char *trans,String &response){
         http.end();
         return rescode;
     }
+
+    // HTTP 200 but Payboard business status is not successful.
+    return 500;
 }
 
 
@@ -316,4 +328,7 @@ int payboard::coinCounter(const char *uuid, int amount,String &trans, String &re
         http.end();
         return rescode;
     }
+
+    // HTTP 200 but Payboard business status is not successful.
+    return 500;
 }

@@ -37,6 +37,7 @@ The project also contains support code for `HW100BP10829` and `HW150BP14896`, bu
 - `payboard.json`: old MQTT protocol notes/example; treat as reference, not authoritative spec
 - `MQTT_PROTOCOL.md`: canonical MQTT topics, connection parameters, command/response contract and current compatibility notes
 - `.agents/skills/platformio-washer-check/SKILL.md`: repository-local read-only environment/build/review workflow
+- `test/test_timer/test_main.cpp`: native Timer unit tests using Arduino primitive mocks
 - Root `.ino` files and `interrupt.*`: legacy snapshots; normal PlatformIO build uses `src/`
 
 ## Runtime flow
@@ -99,6 +100,7 @@ Preferred commands:
 
 ```sh
 /Users/teerin/.platformio/penv/bin/platformio run
+/Users/teerin/.platformio/penv/bin/platformio test -e native
 /Users/teerin/.platformio/penv/bin/platformio run -t upload
 /Users/teerin/.platformio/penv/bin/platformio device monitor -b 115200
 ```
@@ -106,6 +108,8 @@ Preferred commands:
 `pio` is not currently on the shell PATH, so use the absolute executable above unless the environment is activated. Upload port is currently fixed to `/dev/cu.usbserial-10`; verify the actual device before upload. Never upload, erase NVS, or change a running machine without explicit user approval.
 
 The current target builds successfully. A clean build has historically emitted warnings for missing return paths in `Timer`, backend and Payboard API functions, duplicate GPIO macro definitions in `hw10010829.h`, deprecated external LittleFS, and FastLED falling back to bit-banged SPI. Treat new warnings as regressions and reduce the existing set deliberately.
+
+The `native` test environment currently runs Timer tests without hardware by mocking `millis()`, `digitalWrite()` and `Serial`. These tests validate software timing behavior only; relay polarity, coin pulses, door lock sensing and machine programs still require bench hardware.
 
 ## Development rules
 

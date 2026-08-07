@@ -197,6 +197,8 @@ unsigned long Timer::getOperTime(int8_t id)
   if (id >= 0 && id < MAX_NUMBER_OF_EVENTS) {
      return _events[id].operateTime;
   }
+
+  return 0;
 }
 
 unsigned long Timer::getOperTime(int8_t id, int *Hour, int *Min, int *Sec)
@@ -225,21 +227,29 @@ unsigned long Timer::getOperTime(int8_t id, int *Hour, int *Min, int *Sec)
      
     return _events[id].operateTime;
   }
-  
+
+  if (Hour != nullptr) *Hour = 0;
+  if (Min != nullptr) *Min = 0;
+  if (Sec != nullptr) *Sec = 0;
+  return 0;
 }
 
 int8_t Timer::getCounter(int8_t id)
 {
   if (id >= 0 && id < MAX_NUMBER_OF_EVENTS) {    
      return _events[id].count;
-  }   
+  }
+
+  return NO_TIMER_AVAILABLE;
 }
 
 int8_t Timer::getEventType(int8_t id)
 {
   if (id >= 0 && id < MAX_NUMBER_OF_EVENTS) {    
      return _events[id].eventType;
-  }   
+  }
+
+  return TIMER_NOT_AN_EVENT;
 }
 
 int8_t Timer::findFreeEventIndex(void)

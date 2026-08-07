@@ -23,6 +23,7 @@ Use this skill for read-only validation and code review of `HW100BP1XXXX-Mini32`
    - Treat `src/` as the current implementation; root `.ino` files are legacy snapshots.
 4. Build without hardware mutation:
    - Run `platformio run` for the active environment.
+   - Run `platformio test -e native` when the native test environment is present.
    - Report pass/fail, compiler warnings, RAM/flash use, and the exact command used.
    - Do not run `platformio run -t upload`, `erase`, monitor commands, or NVS operations unless the user explicitly requests and authorizes them.
 5. Review risk areas:
@@ -41,6 +42,7 @@ Use this skill for read-only validation and code review of `HW100BP1XXXX-Mini32`
 - Never print or copy credential values. Redact keys, passwords, tokens, and Wi-Fi values.
 - Do not change the selected board model or GPIO map during a review.
 - Do not assume a successful compile proves relay polarity, payment correctness, or safe machine operation.
+- Treat native unit tests as software-only checks; they do not validate GPIO electrical behavior or washer programs.
 - Do not make network/API calls beyond what the build or explicitly requested read-only inspection requires.
 - If a requested change affects payment, OTA, NVS, MQTT authorization, relays, or machine power, stop before execution if scope or authorization is unclear.
 

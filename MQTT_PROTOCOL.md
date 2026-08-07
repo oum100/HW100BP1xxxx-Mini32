@@ -146,7 +146,7 @@ Response เพิ่ม `rssi`, `firmware`, `timeRemain` และ `state`
 - `jobcancel` ยอมรับเฉพาะช่วงต้นของงานตามเวลาที่โค้ดตรวจ
 - `resetstate` หยุด timer และล้างสถานะงาน
 - Direct controls กระทบ relay และเครื่องจริง ต้องจำกัดสิทธิ์ฝั่ง publisher
-- `selftest` ทำงานจริง แต่ response ในโค้ดปัจจุบันใส่ชื่อและ state ผิดเป็น `nvsdelete`
+- `selftest` ทำงานจริงและตอบกลับด้วย `response=selftest`, `state=Selftest completed`
 
 ### Availability controls
 
@@ -200,7 +200,7 @@ Response เพิ่ม `rssi`, `firmware`, `timeRemain` และ `state`
 
 - `single`: 1 pulse = 10 หน่วยเงิน
 - ค่าอื่นรวมถึง `multi`: 1 pulse = 1 หน่วยเงิน
-- ปัจจุบันเปลี่ยนค่าใน RAM แต่ไม่ได้ persist ลง NVS ใน branch นี้
+- เปลี่ยนค่าใน RAM และบันทึกลง NVS ด้วย key `coinModule`
 
 ### `coinwaittimeout`
 
@@ -216,7 +216,7 @@ Response เพิ่ม `rssi`, `firmware`, `timeRemain` และ `state`
 {"action":"assettype","assettype":0}
 ```
 
-ค่าตามโครงสร้างคือ 0=washer, 1=dryer แต่โค้ดปัจจุบันเขียนค่า 0 ลง NVS เสมอ ไม่ว่ารับค่าใด
+ค่าตามโครงสร้างคือ 0=washer, 1=dryer และบันทึกค่าที่รับลง NVS
 
 ## 7. Network and identity configuration
 
@@ -246,7 +246,7 @@ Response เพิ่ม `rssi`, `firmware`, `timeRemain` และ `state`
 }
 ```
 
-บันทึกแล้วรีบูต ปัจจุบัน startup โหลด `merchantid` แต่ไม่ได้โหลด `merchantkey` จาก NVS ในเส้นทางเดียวกัน จึงต้องแก้ก่อนยึดคำสั่งนี้เป็น provisioning ที่เชื่อถือได้
+บันทึกแล้วรีบูต โดย startup โหลดทั้ง `merchantid` และ `merchantkey` จาก NVS
 
 ### `setmqtt`
 
@@ -260,7 +260,7 @@ Response เพิ่ม `rssi`, `firmware`, `timeRemain` และ `state`
 }
 ```
 
-บันทึกแล้วรีบูต ปัจจุบัน branch นี้เขียน `mqttport` เป็น string แต่ startup อ่านเป็น integer และรีบูตก่อน publish response จึงต้องแก้ type และ acknowledgement flow
+บันทึก `mqttport` เป็น integer รองรับชื่อเดิม `mqttportt` ระหว่างเปลี่ยนผ่าน และ publish acknowledgement ก่อนรีบูต
 
 ### `setmac` / `delmac`
 
@@ -277,7 +277,7 @@ Response เพิ่ม `rssi`, `firmware`, `timeRemain` และ `state`
 {"action":"setntp","ntpinx":1,"value":"asia.pool.ntp.org"}
 ```
 
-โค้ดอ่าน server จาก field `value` ไม่ใช่ `ntpserver` ตาม comment เดิม และยังไม่ได้ persist ค่าลง NVS
+โค้ดอ่าน server จาก field `value` ไม่ใช่ `ntpserver` ตาม comment เดิม และบันทึกลง NVS ด้วย key `ntpserver1` หรือ `ntpserver2`
 
 ### `payboard`
 
@@ -291,7 +291,7 @@ Response เพิ่ม `rssi`, `firmware`, `timeRemain` และ `state`
 {"action":"payboard","params":"apikey","apikey":"<secret>"}
 ```
 
-สำหรับ `params="mqtthost"` หรือ `params="all"` โค้ดปัจจุบันอ่าน port จาก field ที่สะกดผิดว่า `mqttportt` ห้ามนำ typo นี้ไปเป็นมาตรฐานถาวร ควรแก้โค้ดให้รองรับ `mqttport` และรองรับชื่อเดิมชั่วคราวเพื่อ compatibility
+สำหรับ `params="mqtthost"` หรือ `params="all"` ให้ใช้ `mqttport`; โค้ดยังรองรับ `mqttportt` ชั่วคราวเพื่อ compatibility
 
 ## 8. Firmware and maintenance commands
 
